@@ -3,7 +3,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PathMapper } from './PathMapper';
 import { SecurityManager } from './SecurityManager';
-import { realPathToResourceUrl } from './OSHelpers';
+import { MountPoint } from './types';
+import {
+	realPathToResourceUrl,
+	ensureLongPathPrefix,
+	isReservedWindowsFilename,
+	translateFsError,
+} from './OSHelpers';
 
 /**
  * VirtualAdapter is a shim that wraps Obsidian's built-in FileSystemAdapter.
@@ -43,7 +49,19 @@ export class VirtualAdapter {
 	private orig(): any { return this.original; }
 
 	// ------------------------------------------------------------------
-	// Security helper
+	// Path helpers
+	// ------------------------------------------------------------------
+
+	/**
+	 * Translate a virtual vault path to a real filesystem path, applying the
+	 * Windows long-path prefix (`\\?\`) when the path exceeds 255 characters.
+	 */
+	private toReal(normalizedPath: string, mount: MountPoint): string {
+		return ensureLongPathPrefix(this.pathMapper.toRealPath(normalizedPath, mount));
+	}
+
+	// ------------------------------------------------------------------
+	// Security helpers
 	// ------------------------------------------------------------------
 
 	private assertAllowed(realPath: string): void {
@@ -51,6 +69,22 @@ export class VirtualAdapter {
 			throw new Error(
 				`FolderBridge: "${realPath}" is not on the allowlist. ` +
 				`Add the mount in plugin settings to permit access.`
+			);
+		}
+	}
+
+	/**
+	 * On Windows, certain device names (CON, NUL, COM1-9, LPT1-9, etc.) are
+	 * reserved by the OS and cannot be used as file or folder names.  Attempting
+	 * to create them produces a cryptic OS error; this guard surfaces a clear
+	 * message instead.
+	 */
+	private assertNotReserved(realPath: string): void {
+		const base = path.basename(realPath);
+		if (isReservedWindowsFilename(base)) {
+			throw new Error(
+				`FolderBridge: "${base}" is a reserved device name on Windows and ` +
+				`cannot be used as a file or folder name (e.g. CON, NUL, COM1-9, LPT1-9).`
 			);
 		}
 	}
@@ -68,7 +102,7 @@ export class VirtualAdapter {
 	async exists(normalizedPath: string, sensitive?: boolean): Promise<boolean> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			try {
 				await fs.promises.access(realPath, fs.constants.F_OK);
 				return true;
@@ -95,7 +129,7 @@ export class VirtualAdapter {
 	async stat(normalizedPath: string): Promise<{ type: 'file' | 'folder'; ctime: number; mtime: number; size: number } | null> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			try {
 				const s = await fs.promises.stat(realPath);
 				return {
@@ -118,7 +152,7 @@ export class VirtualAdapter {
 	async list(normalizedPath: string): Promise<{ files: string[]; folders: string[] }> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			return this.listRealDirectory(realPath, normalizedPath);
 		}
 
@@ -152,9 +186,8 @@ export class VirtualAdapter {
 		try {
 			entries = await fs.promises.readdir(realDirPath, { withFileTypes: true });
 		} catch (e) {
-			throw new Error(
-				`FolderBridge: Cannot list "${realDirPath}": ${(e as Error).message}`
-			);
+			const msg = translateFsError(e as NodeJS.ErrnoException, 'list');
+			throw new Error(`FolderBridge: Cannot list "${realDirPath}": ${msg}`);
 		}
 
 		for (const entry of entries) {
@@ -185,9 +218,13 @@ export class VirtualAdapter {
 	async read(normalizedPath: string): Promise<string> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
-			return fs.promises.readFile(realPath, 'utf8');
+			try {
+				return await fs.promises.readFile(realPath, 'utf8');
+			} catch (e) {
+				throw new Error(`FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'read')}`);
+			}
 		}
 		return this.orig().read(normalizedPath);
 	}
@@ -195,11 +232,15 @@ export class VirtualAdapter {
 	async readBinary(normalizedPath: string): Promise<ArrayBuffer> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
-			const buf = await fs.promises.readFile(realPath);
-			// Return a proper ArrayBuffer (buf.buffer may be a shared Buffer pool slice)
-			return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+			try {
+				const buf = await fs.promises.readFile(realPath);
+				// Return a proper ArrayBuffer (buf.buffer may be a shared Buffer pool slice)
+				return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+			} catch (e) {
+				throw new Error(`FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'readBinary')}`);
+			}
 		}
 		return this.orig().readBinary(normalizedPath);
 	}
@@ -212,11 +253,16 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
+			this.assertNotReserved(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] write → ${realPath}`); return; }
-			await fs.promises.mkdir(path.dirname(realPath), { recursive: true });
-			return fs.promises.writeFile(realPath, data, 'utf8');
+			try {
+				await fs.promises.mkdir(path.dirname(realPath), { recursive: true });
+				return await fs.promises.writeFile(realPath, data, 'utf8');
+			} catch (e) {
+				throw new Error(`FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'write')}`);
+			}
 		}
 		return this.orig().write(normalizedPath, data, options);
 	}
@@ -225,11 +271,16 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
+			this.assertNotReserved(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] writeBinary → ${realPath}`); return; }
-			await fs.promises.mkdir(path.dirname(realPath), { recursive: true });
-			return fs.promises.writeFile(realPath, Buffer.from(data));
+			try {
+				await fs.promises.mkdir(path.dirname(realPath), { recursive: true });
+				return await fs.promises.writeFile(realPath, Buffer.from(data));
+			} catch (e) {
+				throw new Error(`FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'writeBinary')}`);
+			}
 		}
 		return this.orig().writeBinary(normalizedPath, data, options);
 	}
@@ -238,10 +289,14 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] append → ${realPath}`); return; }
-			return fs.promises.appendFile(realPath, data, 'utf8');
+			try {
+				return await fs.promises.appendFile(realPath, data, 'utf8');
+			} catch (e) {
+				throw new Error(`FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'append')}`);
+			}
 		}
 		return this.orig().append(normalizedPath, data, options);
 	}
@@ -268,6 +323,7 @@ export class VirtualAdapter {
 	getResourcePath(normalizedPath: string): string {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
+			// Use the raw real path (no long-path prefix) since this becomes a URL
 			return realPathToResourceUrl(this.pathMapper.toRealPath(normalizedPath, mount));
 		}
 		return this.orig().getResourcePath(normalizedPath);
@@ -281,10 +337,15 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
+			this.assertNotReserved(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] mkdir → ${realPath}`); return; }
-			await fs.promises.mkdir(realPath, { recursive: true });
+			try {
+				await fs.promises.mkdir(realPath, { recursive: true });
+			} catch (e) {
+				throw new Error(`FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'mkdir')}`);
+			}
 			return;
 		}
 		return this.orig().mkdir(normalizedPath);
@@ -298,7 +359,7 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] trashSystem → ${realPath}`); return true; }
 			try {
@@ -319,7 +380,7 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
+			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] trashLocal → ${realPath}`); return; }
 			await fs.promises.rm(realPath, { recursive: true, force: true });
@@ -343,13 +404,27 @@ export class VirtualAdapter {
 		if (srcMount && dstMount && srcMount.id === dstMount.id) {
 			// Rename within the same mount
 			if (srcMount.readOnly) throw new Error(`FolderBridge: Mount "${srcMount.virtualPath}" is read-only.`);
-			const srcReal = this.pathMapper.toRealPath(normalizedPath, srcMount);
-			const dstReal = this.pathMapper.toRealPath(newNormalizedPath, dstMount);
+			const srcReal = this.toReal(normalizedPath, srcMount);
+			const dstReal = this.toReal(newNormalizedPath, dstMount);
 			this.assertAllowed(srcReal);
 			this.assertAllowed(dstReal);
+			this.assertNotReserved(dstReal);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] rename ${srcReal} → ${dstReal}`); return; }
 			await fs.promises.mkdir(path.dirname(dstReal), { recursive: true });
-			return fs.promises.rename(srcReal, dstReal);
+			try {
+				await fs.promises.rename(srcReal, dstReal);
+			} catch (e) {
+				const err = e as NodeJS.ErrnoException;
+				if (err.code === 'EXDEV') {
+					// Cross-device move (e.g. different drive letters on Windows):
+					// fall back to copy-then-delete so the operation succeeds transparently.
+					await fs.promises.copyFile(srcReal, dstReal);
+					await fs.promises.rm(srcReal, { recursive: true });
+					return;
+				}
+				throw new Error(`FolderBridge: ${translateFsError(err, 'rename')}`);
+			}
+			return;
 		}
 
 		// Cross-mount or cross-adapter rename is not atomic – surface a clear error
@@ -378,19 +453,27 @@ export class VirtualAdapter {
 			return;
 		}
 
-		// Read from source
-		const content: Buffer = srcMount
-			? await fs.promises.readFile(this.pathMapper.toRealPath(normalizedPath, srcMount))
-			: Buffer.from(await this.orig().read(normalizedPath) as string, 'utf8');
+		try {
+			// Read from source
+			const content: Buffer = srcMount
+				? await fs.promises.readFile(this.toReal(normalizedPath, srcMount))
+				: Buffer.from(await this.orig().read(normalizedPath) as string, 'utf8');
 
-		// Write to destination
-		if (dstMount) {
-			const dstReal = this.pathMapper.toRealPath(newNormalizedPath, dstMount);
-			this.assertAllowed(dstReal);
-			await fs.promises.mkdir(path.dirname(dstReal), { recursive: true });
-			await fs.promises.writeFile(dstReal, content);
-		} else {
-			await this.orig().write(newNormalizedPath, content.toString('utf8'));
+			// Write to destination
+			if (dstMount) {
+				const dstReal = this.toReal(newNormalizedPath, dstMount);
+				this.assertAllowed(dstReal);
+				this.assertNotReserved(dstReal);
+				await fs.promises.mkdir(path.dirname(dstReal), { recursive: true });
+				await fs.promises.writeFile(dstReal, content);
+			} else {
+				await this.orig().write(newNormalizedPath, content.toString('utf8'));
+			}
+		} catch (e) {
+			// Re-throw FolderBridge errors unchanged; translate raw fs errors
+			const err = e as Error;
+			if (err.message.startsWith('FolderBridge:')) throw err;
+			throw new Error(`FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'copy')}`);
 		}
 	}
 }

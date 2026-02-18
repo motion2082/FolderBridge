@@ -126,6 +126,12 @@ export class MountManagerModal extends Modal {
 			return;
 		}
 
+		// Show non-blocking advisory warnings (e.g. UNC/network paths) before closing
+		const warnings = this.security.getPathWarnings(this.realPath);
+		for (const w of warnings) {
+			new Notice(`FolderBridge warning: ${w}`, 10000);
+		}
+
 		await this.onSave({
 			virtualPath: normalizePath(this.virtualPath),
 			realPath: this.realPath,

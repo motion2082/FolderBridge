@@ -129,3 +129,88 @@ export function realPathToResourceUrl(realPath: string): string {
 	const withSlash = forward.startsWith('/') ? forward : '/' + forward;
 	return `app://local${withSlash}`;
 }
+
+// ---------------------------------------------------------------------------
+// Windows path utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a path for equality comparison.  On Windows (case-insensitive
+ * NTFS) this lowercases the result so that 'C:\Docs' and 'c:\docs' are
+ * treated as the same path.  On POSIX systems the case is preserved.
+ */
+export function normalizeForComparison(p: string): string {
+	const n = path.normalize(p);
+	return getPlatform() === 'windows' ? n.toLowerCase() : n;
+}
+
+/**
+ * Returns true for UNC network paths (e.g. `\\server\share`).
+ * These start with two backslashes and indicate a network location.
+ */
+export function isUNCPath(p: string): boolean {
+	return p.startsWith('\\\\');
+}
+
+/**
+ * On Windows, paths longer than 260 characters (MAX_PATH) silently fail
+ * unless the path is prefixed with `\\?\` (or `\\?\UNC\` for UNC paths).
+ * This helper applies the prefix when needed.  It is a no-op on other
+ * platforms, or when the path is already prefixed or short enough.
+ */
+export function ensureLongPathPrefix(p: string): string {
+	if (getPlatform() !== 'windows') return p;
+	if (p.startsWith('\\\\?\\')) return p;  // already prefixed
+	if (p.length <= 255) return p;           // short enough; no prefix needed
+	if (isUNCPath(p)) {
+		// \\server\share\... → \\?\UNC\server\share\...
+		return '\\\\?\\UNC\\' + p.slice(2);
+	}
+	// C:\... → \\?\C:\...
+	return '\\\\?\\' + p;
+}
+
+/**
+ * Returns true when `name` is a Windows reserved device filename.
+ * These names (CON, NUL, COM1-9, LPT1-9, etc.) cannot be used as file or
+ * directory names on Windows, even with an extension (e.g. `CON.txt`).
+ *
+ * Always returns false on non-Windows platforms.
+ */
+export function isReservedWindowsFilename(name: string): boolean {
+	if (getPlatform() !== 'windows') return false;
+	const stem = name.split('.')[0];
+	return /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(stem);
+}
+
+/**
+ * Translate a Node.js filesystem error code into a user-friendly message
+ * with platform-appropriate guidance where relevant.
+ */
+export function translateFsError(err: NodeJS.ErrnoException, op: string): string {
+	const p = err.path ? `"${err.path}"` : 'path';
+	switch (err.code) {
+		case 'EACCES':
+			return `Access denied to ${p}. Check folder permissions.`;
+		case 'EPERM':
+			return getPlatform() === 'windows'
+				? `Operation not permitted on ${p}. On Windows, creating symbolic links ` +
+				  `requires Developer Mode (Settings → System → For Developers) or administrator rights.`
+				: `Operation not permitted on ${p}. Check file permissions or ownership.`;
+		case 'ENAMETOOLONG':
+			return getPlatform() === 'windows'
+				? `Path exceeds the Windows 260-character limit. Enable Long Paths in ` +
+				  `Windows Settings → System → For Developers → Long Paths, or use a shorter path.`
+				: `Path name is too long for the filesystem.`;
+		case 'EBUSY':
+			return `${p} is locked by another process. Close any programs using it and try again.`;
+		case 'ENOENT':
+			return `${p} was not found. It may have been moved or deleted.`;
+		case 'ENOSPC':
+			return `Not enough disk space to complete the operation.`;
+		case 'EXDEV':
+			return `Cross-device move is not supported at the OS level (handled internally by FolderBridge).`;
+		default:
+			return `${op}: ${err.message}`;
+	}
+}
