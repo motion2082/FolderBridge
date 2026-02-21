@@ -105,12 +105,27 @@ describe('SecurityManager', () => {
 			expect(err).toMatch(/overlaps/i);
 		});
 
-		it('rejects a real path that is a subdirectory of an existing mount real path', () => {
+		it('allows a real path that is a subdirectory of an existing mount real path (advisory warning only)', () => {
 			const existing: MountPoint[] = [{
 				id: '1', virtualPath: 'ParentMount', realPath: '/real/parent', enabled: true, readOnly: false,
 			}];
+			// No longer a blocking error — overlap is surfaced as an advisory warning instead
 			const err = sec.validateMount(mkMount('ChildMount', '/real/parent/child'), existing);
-			expect(err).toMatch(/overlaps/i);
+			expect(err).toBeNull();
+			expect(sec.getPathWarnings('/real/parent/child', existing).length).toBeGreaterThan(0);
+		});
+
+		it('allows Backup/Code-Scalpel and Backup to coexist as separate bridges', () => {
+			// Scenario from issue: mount virtualPath "Code-Scalpel" → /Backup/Code-Scalpel first,
+			// then mount virtualPath "Backup" → /Backup.  Real paths overlap; virtual paths do not.
+			const existing: MountPoint[] = [{
+				id: '1', virtualPath: 'Code-Scalpel', realPath: '/Backup/Code-Scalpel', enabled: true, readOnly: false,
+			}];
+			const err = sec.validateMount(mkMount('Backup', '/Backup'), existing);
+			expect(err).toBeNull();
+			// Overlap between /Backup and /Backup/Code-Scalpel should be surfaced as an advisory warning
+			const warnings = sec.getPathWarnings('/Backup', existing);
+			expect(warnings.length).toBeGreaterThan(0);
 		});
 
 	});
@@ -122,8 +137,34 @@ describe('SecurityManager', () => {
 			expect(warnings[0]).toMatch(/UNC|network/i);
 		});
 
-		it('returns no warnings for a normal local path', () => {
+		it('returns no warnings for a normal local path with no existing mounts', () => {
 			const warnings = sec.getPathWarnings('/home/user/docs');
+			expect(warnings).toHaveLength(0);
+		});
+
+		it('returns an advisory warning when the candidate is a child of an existing mount real path', () => {
+			const existing: MountPoint[] = [{
+				id: '1', virtualPath: 'Backup', realPath: '/Backup', enabled: true, readOnly: false,
+			}];
+			const warnings = sec.getPathWarnings('/Backup/Code-Scalpel', existing);
+			expect(warnings.length).toBeGreaterThan(0);
+			expect(warnings[0]).toMatch(/overlaps/i);
+		});
+
+		it('returns an advisory warning when the candidate is a parent of an existing mount real path', () => {
+			const existing: MountPoint[] = [{
+				id: '1', virtualPath: 'CodeScalpel', realPath: '/Backup/Code-Scalpel', enabled: true, readOnly: false,
+			}];
+			const warnings = sec.getPathWarnings('/Backup', existing);
+			expect(warnings.length).toBeGreaterThan(0);
+			expect(warnings[0]).toMatch(/overlaps/i);
+		});
+
+		it('returns no overlap warning when the real paths are unrelated', () => {
+			const existing: MountPoint[] = [{
+				id: '1', virtualPath: 'Work', realPath: '/home/user/Work', enabled: true, readOnly: false,
+			}];
+			const warnings = sec.getPathWarnings('/home/user/Docs', existing);
 			expect(warnings).toHaveLength(0);
 		});
 	});

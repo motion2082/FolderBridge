@@ -116,28 +116,6 @@ export class SecurityManager {
 			}
 		}
 
-		// Reject mounts whose real paths are parents/children of existing ones
-		for (const m of existingMounts) {
-			const existingReal = m.realPath;
-			if (!existingReal) {
-				continue;
-			}
-			const existingRealNorm = normalizeForComparison(existingReal);
-			if (existingRealNorm === norm) {
-				continue;
-			}
-
-			const isCandidateChildOfExistingReal =
-				norm.startsWith(existingRealNorm + path.sep) ||
-				norm.startsWith(existingRealNorm + '/');
-			const isExistingChildOfCandidateReal =
-				existingRealNorm.startsWith(norm + path.sep) ||
-				existingRealNorm.startsWith(norm + '/');
-
-			if (isCandidateChildOfExistingReal || isExistingChildOfCandidateReal) {
-				return `Real path "${mount.realPath}" overlaps with existing mount "${existingReal}".`;
-			}
-		}
 		return null;
 	}
 
@@ -145,8 +123,11 @@ export class SecurityManager {
 	 * Returns non-blocking advisory warnings for a real path.
 	 * Unlike validateMount(), these do not prevent the mount from being added —
 	 * they are surfaced to the user as informational notices.
+	 *
+	 * Pass `existingMounts` to also receive overlap advisories when the
+	 * candidate real path is a parent or child of an already-mounted path.
 	 */
-	getPathWarnings(realPath: string): string[] {
+	getPathWarnings(realPath: string, existingMounts: MountPoint[] = []): string[] {
 		const warnings: string[] = [];
 
 		if (isUNCPath(realPath)) {
@@ -155,6 +136,28 @@ export class SecurityManager {
 				`unavailable offline, or behave differently from local folders ` +
 				`(e.g. file watching may not work on some servers).`
 			);
+		}
+
+		const norm = normalizeForComparison(realPath);
+		for (const m of existingMounts) {
+			const existingReal = m.realPath;
+			if (!existingReal) continue;
+			const existingRealNorm = normalizeForComparison(existingReal);
+			if (existingRealNorm === norm) continue;
+
+			const isCandidateChildOfExisting =
+				norm.startsWith(existingRealNorm + path.sep) ||
+				norm.startsWith(existingRealNorm + '/');
+			const isExistingChildOfCandidate =
+				existingRealNorm.startsWith(norm + path.sep) ||
+				existingRealNorm.startsWith(norm + '/');
+
+			if (isCandidateChildOfExisting || isExistingChildOfCandidate) {
+				warnings.push(
+					`Real path "${realPath}" overlaps with existing mount "${existingReal}". ` +
+					`The same files on disk will be reachable via two different vault paths.`
+				);
+			}
 		}
 
 		return warnings;

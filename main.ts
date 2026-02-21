@@ -124,6 +124,12 @@ export default class FolderBridgePlugin extends Plugin {
 			return;
 		}
 
+		// Surface non-blocking advisory warnings (e.g. UNC paths, real-path overlaps)
+		const warnings = this.security.getPathWarnings(mountData.realPath, this.settings.mountPoints);
+		for (const w of warnings) {
+			new Notice(`FolderBridge warning: ${w}`, 10_000);
+		}
+
 		const mount: MountPoint = { ...mountData, id: generateId() };
 		this.settings.mountPoints.push(mount);
 

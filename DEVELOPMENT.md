@@ -105,6 +105,35 @@ npm run version
 - Updates version in `manifest.json` and `versions.json`
 - Automatically runs as part of npm version commands
 
+## Releasing a New Version
+
+The release pipeline is fully automated via GitHub Actions (`.github/workflows/release.yml`).
+To cut a release:
+
+1. **Update `CHANGELOG.md`** — add a new `## [X.Y.Z] - YYYY-MM-DD` section above the previous release with the changes for this version, and add a link reference at the bottom.
+
+2. **Bump the version** — run the following command (replace `X.Y.Z` with the new version):
+   ```bash
+   npm version X.Y.Z
+   ```
+   This will:
+   - Update `package.json`, `manifest.json`, and `versions.json` with the new version
+   - Create a Git commit (`chore: X.Y.Z`)
+   - Create a Git tag `X.Y.Z` (no `v` prefix — configured via `.npmrc`)
+
+3. **Push the commit and tag**:
+   ```bash
+   git push && git push --tags
+   ```
+
+4. **GitHub Actions takes over** — pushing the `X.Y.Z` tag triggers the release workflow, which:
+   - Runs tests and the production build
+   - Validates the tag matches `manifest.json`
+   - Extracts release notes from `CHANGELOG.md`
+   - Creates a GitHub Release with `main.js`, `manifest.json`, and `styles.css` as downloadable assets
+
+> **Note:** The tag must not have a `v` prefix (e.g. use `0.2.0`, not `v0.2.0`). The `.npmrc` setting `tag-version-prefix=` ensures `npm version` honors this automatically.
+
 ### Hot Reload Setup
 
 1. Install the **Hot Reload** plugin in Obsidian:
