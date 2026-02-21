@@ -53,6 +53,15 @@ export default class FolderBridgePlugin extends Plugin {
 		// Settings tab
 		this.addSettingTab(new FolderBridgeSettingTab(this.app, this));
 
+		// After the workspace finishes loading, inject all enabled mounts into
+		// Obsidian's internal vault file tree so they appear in the file explorer
+		// without requiring a restart.
+		this.app.workspace.onLayoutReady(async () => {
+			for (const mount of this.settings.mountPoints.filter(m => m.enabled)) {
+				await this.notifyVaultMountAdded(mount);
+			}
+		});
+
 		console.log(`FolderBridge loaded (${getPlatform()}, ${this.settings.mountPoints.filter(m => m.enabled).length} active mounts)`);
 	}
 
@@ -127,6 +136,7 @@ export default class FolderBridgePlugin extends Plugin {
 		await this.saveSettings();
 		this.pathMapper.update(this.settings.mountPoints);
 		this.updateStatusBar();
+		await this.notifyVaultMountAdded(mount);
 
 		new Notice(`FolderBridge: Mounted "${mount.realPath}" → "${mount.virtualPath}"`);
 	}
@@ -136,6 +146,10 @@ export default class FolderBridgePlugin extends Plugin {
 		if (idx === -1) return;
 
 		const mount = this.settings.mountPoints[idx];
+
+		// Remove from vault tree BEFORE removing from pathMapper so stat() still resolves
+		await this.notifyVaultMountRemoved(mount);
+
 		this.settings.mountPoints.splice(idx, 1);
 
 		// Only revoke the allowlist entry if no other active mount shares the real path
@@ -150,6 +164,57 @@ export default class FolderBridgePlugin extends Plugin {
 		this.updateStatusBar();
 
 		new Notice(`FolderBridge: Removed mount "${mount.virtualPath}"`);
+	}
+
+	// ------------------------------------------------------------------
+	// Vault file-tree injection
+	// ------------------------------------------------------------------
+
+	/**
+	 * Notify Obsidian's internal vault index that a new virtual mount folder
+	 * exists so it appears in the file explorer without requiring a restart.
+	 *
+	 * Obsidian's internal `vault.onChange('created', path)` is the same hook
+	 * the OS file-watcher uses to signal new paths.  Because our VirtualAdapter
+	 * intercepts `adapter.stat()`, Obsidian correctly identifies each segment
+	 * as a folder and inserts it into its internal TFolder tree.
+	 */
+	async notifyVaultMountAdded(mount: MountPoint): Promise<void> {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const vault = this.app.vault as any;
+		if (typeof vault.onChange !== 'function') return;
+
+		// Walk every path segment so intermediate virtual folders also appear
+		// (e.g. mounting "Projects/Work" also surfaces the "Projects" folder).
+		const segments = normalizePath(mount.virtualPath).split('/');
+		for (let i = 1; i <= segments.length; i++) {
+			const partPath = segments.slice(0, i).join('/');
+			// Skip segments Obsidian already knows about
+			if (this.app.vault.getAbstractFileByPath(partPath)) continue;
+			try {
+				await vault.onChange('created', partPath, null, null);
+			} catch (e) {
+				console.debug('FolderBridge: vault.onChange(created) unavailable', e);
+			}
+		}
+	}
+
+	/**
+	 * Remove a virtual mount folder from Obsidian's internal vault index
+	 * so the file explorer stops showing it immediately after removal.
+	 */
+	async notifyVaultMountRemoved(mount: MountPoint): Promise<void> {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const vault = this.app.vault as any;
+		if (typeof vault.onChange !== 'function') return;
+
+		const nPath = normalizePath(mount.virtualPath);
+		if (!this.app.vault.getAbstractFileByPath(nPath)) return;
+		try {
+			await vault.onChange('deleted', nPath, null, null);
+		} catch (e) {
+			console.debug('FolderBridge: vault.onChange(deleted) unavailable', e);
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -300,6 +365,12 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					this.plugin.pathMapper.update(this.plugin.settings.mountPoints);
 					this.plugin.updateStatusBar();
+					// Inject into / remove from Obsidian's vault tree live
+					if (val) {
+						await this.plugin.notifyVaultMountAdded(mount);
+					} else {
+						await this.plugin.notifyVaultMountRemoved(mount);
+					}
 				}))
 			.addButton(btn => btn
 				.setButtonText('Remove')

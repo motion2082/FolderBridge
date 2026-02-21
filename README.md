@@ -31,6 +31,30 @@ Extends Obsidian's single-root vault by letting you mount external folders as se
 2. Copy them to `<your-vault>/.obsidian/plugins/obsidian-folderbridge/`
 3. Enable the plugin in **Settings → Community Plugins**
 
+### Local Development (git clone)
+
+If you want to run straight from source (no release download needed):
+
+```bash
+# 1. Clone into your vault's plugin folder
+git clone https://github.com/tescolopio/Obsidian_FolderBridge.git \
+  /path/to/your-vault/.obsidian/plugins/obsidian-folderbridge
+
+cd /path/to/your-vault/.obsidian/plugins/obsidian-folderbridge
+
+# 2. Install dependencies
+npm install
+
+# 3. Build the plugin (produces main.js that Obsidian loads)
+npm run build
+```
+
+Then in Obsidian: **Settings → Community Plugins → disable Safe Mode → enable FolderBridge**.
+
+> **Hot-reload during development:** run `npm run dev` instead of `npm run build`.
+> Install the [hot-reload plugin](https://github.com/pjeby/hot-reload) in Obsidian and it will
+> automatically reload FolderBridge whenever `main.js` is rebuilt.
+
 ---
 
 ## Quick Start
@@ -42,7 +66,9 @@ Extends Obsidian's single-root vault by letting you mount external folders as se
    - **Real path** — the absolute path on disk, e.g. `C:\Users\YourName\Documents\Work` (Windows) or `/home/yourname/Documents/Work` (Linux/Mac)
 4. Click **Validate & Add**
 
-The folder now appears in Obsidian's file explorer at the virtual path you chose.
+The folder appears immediately in Obsidian's file explorer at the virtual path you chose —
+no restart needed. Files are read and written directly from their original location on disk;
+nothing is copied or moved.
 
 ---
 
