@@ -112,6 +112,7 @@ describe('SecurityManager', () => {
 			// No longer a blocking error — overlap is surfaced as an advisory warning instead
 			const err = sec.validateMount(mkMount('ChildMount', '/real/parent/child'), existing);
 			expect(err).toBeNull();
+			expect(sec.getPathWarnings('/real/parent/child', existing).length).toBeGreaterThan(0);
 		});
 
 		it('allows Backup/Code-Scalpel and Backup to coexist as separate bridges', () => {
