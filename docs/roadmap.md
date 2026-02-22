@@ -4,6 +4,12 @@ This document outlines upcoming enhancements and platform compatibility goals fo
 
 ## Planned Extensions
 
+- **Virtual Path Management & Drag-Drop Reorganization** (high priority)
+  - Allow users to edit or change the virtual path of an existing mount without recreating it.
+  - Support drag-drop reordering of mounts in the settings UI for better organization.
+  - Enable drag-drop moving of mounts within the vault file explorer (e.g., moving a mount from `Projects/Work` to `Archive/Work`).
+  - This will provide UX parity with Obsidian's native folder management and reduce friction when reorganizing.
+
 - **Android** (current priority)
   - Provide a lightweight APK or integration that allows Android devices to mount external or network folders directly into an Obsidian vault on mobile.
   - Focus on compatibility with USB drives, cloud-sync folders (Dropbox, Google Drive), and local storage.
