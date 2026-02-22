@@ -38,6 +38,13 @@ export class FileWatcher {
 
                 return false;
             },
+            // SECURITY: Do not follow symlinks. If a symlink inside the mount points
+            // outside the mount's real path, PathMapper.toVirtualPath() returns the
+            // mount root (not undefined) for out-of-bounds paths, which would cause
+            // vault.onChange to signal Obsidian to remove the entire mount from its
+            // view. Disabling symlink-following prevents chokidar from ever emitting
+            // events for paths outside the mount boundary.
+            followSymlinks: false,
             ignoreInitial: true, // Don't trigger 'add' events for existing files on startup
             persistent: true,
             awaitWriteFinish: {
