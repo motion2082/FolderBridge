@@ -27,7 +27,7 @@ export async function browseFolderOnDisk(title = 'Select Folder', defaultPath?: 
 			new Notice('FolderBridge: Native folder browser is unavailable. Please type the path manually.');
 			return null;
 		}
-		const options: any = {
+		const options: { properties: Array<'openDirectory' | 'openFile' | 'multiSelections' | 'showHiddenFiles'>; title: string; defaultPath?: string } = {
 			properties: ['openDirectory'],
 			title,
 		};
