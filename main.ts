@@ -416,8 +416,9 @@ export default class FolderBridgePlugin extends Plugin {
 			const fileExplorerLeaves = this.app.workspace.getLeavesOfType('file-explorer');
 			if (fileExplorerLeaves.length === 0) return;
 
-			const fileExplorerView = fileExplorerLeaves[0].view as { fileItems: Record<string, { setCollapsed?: (collapsed: boolean) => void }> };
-			const fileItems = fileExplorerView.fileItems;
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const fileExplorerView = fileExplorerLeaves[0].view as any;
+			const fileItems = fileExplorerView.fileItems as Record<string, { setCollapsed?: (collapsed: boolean) => void }>;
 
 			const folderPath = normalizePath(mount.virtualPath);
 			if (fileItems && fileItems[folderPath]) {
