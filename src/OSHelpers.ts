@@ -123,6 +123,19 @@ export function normalizeRealPath(realPath: string): string {
  * bypasses the vault root restriction.
  */
 export function realPathToResourceUrl(realPath: string): string {
+	// Obsidian provides a built-in way to convert a file path to a resource URL
+	// that handles all the platform-specific quirks (like app://local vs capacitor://localhost)
+	// and proper URL encoding.
+	// We can access it via the global app object if it's available.
+
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const globalApp = (window as any).app;
+	if (globalApp && typeof globalApp.vault.adapter.getResourcePath === 'function') {
+		// We can't pass the real path to getResourcePath because it expects a vault-relative path.
+		// But we can use the internal file URL conversion if we can find it.
+	}
+
+	// Fallback manual implementation
 	// Electron expects forward slashes even on Windows
 	const forward = realPath.split(path.sep).join('/');
 
@@ -147,7 +160,7 @@ export function realPathToResourceUrl(realPath: string): string {
 
 	const finalPath = encodedPath.startsWith('/') ? encodedPath : '/' + encodedPath;
 
-	console.log(`[FolderBridge] realPathToResourceUrl: "${realPath}" -> "app://local${finalPath}"`);
+	// Remove the console.log to clean up the console
 	return `app://local${finalPath}`;
 }
 

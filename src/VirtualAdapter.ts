@@ -419,24 +419,7 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			// Use the raw real path (no long-path prefix) since this becomes a URL
-			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
-
-			// Obsidian provides a built-in way to convert a file path to a resource URL
-			// that handles all the platform-specific quirks (like app://local vs capacitor://localhost)
-			// and proper URL encoding.
-			// We can use the original adapter's getResourcePath method, but we have to pass it
-			// the real path, not the virtual path, because the original adapter doesn't know about mounts.
-			// However, the original adapter expects vault-relative paths.
-			// Let's try using Obsidian's built-in file URL conversion if available.
-
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const globalApp = (window as any).app;
-			if (globalApp && typeof globalApp.vault.adapter.getResourcePath === 'function') {
-				// We can't pass the real path to getResourcePath because it expects a vault-relative path.
-				// But we can use the internal file URL conversion if we can find it.
-			}
-
-			return realPathToResourceUrl(realPath);
+			return realPathToResourceUrl(this.pathMapper.toRealPath(normalizedPath, mount));
 		}
 		return this.orig().getResourcePath(normalizedPath);
 	}
