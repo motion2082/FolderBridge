@@ -142,3 +142,6 @@ vite.config.ts.timestamp-*
 main.js
 main.js.map
 *.js.map
+
+/docs/MARKETING.md
+/docs/ROADMAP.md

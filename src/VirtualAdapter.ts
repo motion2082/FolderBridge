@@ -157,8 +157,11 @@ export class VirtualAdapter {
 					mtime: s.mtimeMs,
 					size: s.size,
 				};
-			} catch (e) {
-				console.debug(`[FolderBridge] stat failed for "${realPath}":`, e);
+			} catch (e: any) {
+				// Obsidian expects null for missing files, not an error
+				if (e.code !== 'ENOENT') {
+					console.debug(`[FolderBridge] stat failed for "${realPath}":`, e);
+				}
 				return null;
 			}
 		}
@@ -334,16 +337,12 @@ export class VirtualAdapter {
 	// ------------------------------------------------------------------
 
 	async write(normalizedPath: string, data: string, options?: unknown): Promise<void> {
-		console.log(`[FolderBridge] write() called with path: "${normalizedPath}"`);
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			console.debug(`[FolderBridge] write: found mount for "${normalizedPath}"`);
-
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`FolderBridge: Cannot write to ignored path "${normalizedPath}"`);
 
 			const realPath = this.toReal(normalizedPath, mount);
-			console.debug(`[FolderBridge] write: resolved to real path "${realPath}"`);
 
 			this.assertAllowed(realPath);
 			this.assertNotReserved(realPath);
@@ -351,7 +350,6 @@ export class VirtualAdapter {
 			try {
 				await fs.promises.mkdir(path.dirname(realPath), { recursive: true });
 				await fs.promises.writeFile(realPath, data, 'utf8');
-				console.debug(`[FolderBridge] write: successfully wrote to "${realPath}"`);
 			} catch (e) {
 				const errorMsg = `FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'write')}`;
 				console.error(`[FolderBridge] write failed for "${realPath}":`, e, errorMsg);
@@ -362,7 +360,6 @@ export class VirtualAdapter {
 	}
 
 	async writeBinary(normalizedPath: string, data: ArrayBuffer, options?: unknown): Promise<void> {
-		console.log(`[FolderBridge] writeBinary() called with path: "${normalizedPath}"`);
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
@@ -382,7 +379,6 @@ export class VirtualAdapter {
 	}
 
 	async append(normalizedPath: string, data: string, options?: unknown): Promise<void> {
-		console.log(`[FolderBridge] append() called with path: "${normalizedPath}"`);
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
@@ -404,7 +400,6 @@ export class VirtualAdapter {
 		fn: (data: string) => string,
 		options?: unknown,
 	): Promise<string> {
-		console.log(`[FolderBridge] process() called with path: "${normalizedPath}"`);
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`FolderBridge: Cannot process ignored path "${normalizedPath}"`);
@@ -434,19 +429,12 @@ export class VirtualAdapter {
 	// ------------------------------------------------------------------
 
 	async mkdir(normalizedPath: string): Promise<void> {
-		console.log(`[FolderBridge] mkdir() called with path: "${normalizedPath}"`);
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			console.debug(`[FolderBridge] mkdir: found mount for "${normalizedPath}"`, {
-				mount: mount.virtualPath,
-				readOnly: mount.readOnly
-			});
-
 			if (mount.readOnly) throw new Error(`FolderBridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`FolderBridge: Cannot create ignored path "${normalizedPath}"`);
 
 			const realPath = this.toReal(normalizedPath, mount);
-			console.debug(`[FolderBridge] mkdir: resolved to real path "${realPath}"`);
 
 			this.assertAllowed(realPath);
 			this.assertNotReserved(realPath);
@@ -458,7 +446,6 @@ export class VirtualAdapter {
 
 			try {
 				await fs.promises.mkdir(realPath, { recursive: true });
-				console.debug(`[FolderBridge] mkdir: successfully created "${realPath}"`);
 			} catch (e) {
 				const errorMsg = `FolderBridge: ${translateFsError(e as NodeJS.ErrnoException, 'mkdir')}`;
 				console.error(`[FolderBridge] mkdir failed for "${realPath}":`, e, errorMsg);
@@ -467,7 +454,6 @@ export class VirtualAdapter {
 			return;
 		}
 
-		console.debug(`[FolderBridge] mkdir: no mount found for "${normalizedPath}", delegating to original adapter`);
 		return this.orig().mkdir(normalizedPath);
 	}
 

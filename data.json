@@ -1,57 +1,12 @@
 {
   "mountPoints": [
     {
-      "virtualPath": "Pictures",
-      "realPath": "K:\\Pictures",
+      "virtualPath": "hoarder_rehab",
+      "realPath": "D:\\source\\3D-Tech-Solutions\\hoarder_rehab",
       "enabled": true,
       "readOnly": false,
-      "label": "Pictures",
-      "id": "dw952xtmlwu56ef",
-      "deviceId": "pnvhoinmlwve7nw",
-      "ignoreList": [
-        ".git",
-        "node_modules",
-        ".obsidian",
-        "tests/"
-      ]
-    },
-    {
-      "virtualPath": "Eski-Enterprises/Firespeaker",
-      "realPath": "K:\\backup\\Develop\\Firespeaker",
-      "enabled": true,
-      "readOnly": false,
-      "label": "Firespeaker",
-      "id": "byhoaptmlww0y20",
-      "deviceId": "pnvhoinmlwve7nw",
-      "ignoreList": [
-        ".git",
-        "node_modules",
-        ".obsidian",
-        "tests/"
-      ]
-    },
-    {
-      "virtualPath": "Eski-Enterprises/3D Tech Solutions/code-scalpel",
-      "realPath": "K:\\backup\\Develop\\code-scalpel",
-      "enabled": true,
-      "readOnly": false,
-      "label": "Code Scalpel",
-      "id": "zsi7k1ymlww51uz",
-      "deviceId": "pnvhoinmlwve7nw",
-      "ignoreList": [
-        ".git",
-        "node_modules",
-        ".obsidian",
-        "tests/"
-      ]
-    },
-    {
-      "virtualPath": "moltbook-graph",
-      "realPath": "D:\\moltbook-graph",
-      "enabled": true,
-      "readOnly": false,
-      "label": "moltbook-graph",
-      "id": "ykf4i61mlwxvtyz",
+      "label": "hoarder_rehab",
+      "id": "89dmbynmly4xi2i",
       "deviceId": "pnvhoinmlwve7nw",
       "ignoreList": [
         ".git",
@@ -61,10 +16,7 @@
     }
   ],
   "allowlist": [
-    "K:\\backup\\Develop\\code-scalpel",
-    "K:\\Pictures",
-    "K:\\backup\\Develop\\Firespeaker",
-    "D:\\moltbook-graph"
+    "D:\\source\\3D-Tech-Solutions\\hoarder_rehab"
   ],
   "dryRun": false,
   "showStatusBar": true,

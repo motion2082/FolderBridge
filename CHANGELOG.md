@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-22
+
+### Fixed
+- Fixed a critical bug where creating or modifying files in mounted folders would fail because Obsidian's internal file existence checks were receiving generic errors instead of the expected `ENOENT` error code.
+- Fixed an issue where images and other resources in mounted folders might fail to load due to incorrect path resolution.
+
 ## [0.3.0] - 2026-02-21
 
 ### Added

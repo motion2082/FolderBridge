@@ -50,36 +50,17 @@ export class PathMapper {
 	 * lives entirely inside the real vault.
 	 */
 	getMountForPath(virtualPath: string): MountPoint | undefined {
-		console.log(`[FolderBridge] PathMapper.getMountForPath() called with: "${virtualPath}" (mounts: ${this.mounts.length})`);
 		const n = normalizePath(virtualPath);
+
 		// Sort by virtualPath length descending so the most-specific mount wins
 		const sorted = [...this.mounts].sort(
 			(a, b) => b.virtualPath.length - a.virtualPath.length
 		);
 
-		// Debug: log mount detection attempt
-		if (this.mounts.length > 0) {
-			console.debug(`[FolderBridge PathMapper] getMountForPath("${virtualPath}") -> normalized: "${n}"`);
-			console.debug(`[FolderBridge PathMapper] Available mounts:`,
-				sorted.map(m => ({ virtualPath: m.virtualPath, normalized: normalizePath(m.virtualPath) }))
-			);
-		}
-
 		const result = sorted.find(m => {
 			const mv = normalizePath(m.virtualPath);
-			const matches = n === mv || n.startsWith(mv + '/');
-			if (this.mounts.length > 0) {
-				console.debug(`[FolderBridge PathMapper] Checking "${n}" against mount "${mv}": ${matches ? 'MATCH' : 'no match'}`);
-			}
-			return matches;
+			return n === mv || n.startsWith(mv + '/');
 		});
-
-		if (result) {
-			console.debug(`[FolderBridge PathMapper] Found mount: "${result.virtualPath}"`);
-		} else {
-			console.debug(`[FolderBridge PathMapper] No mount found for "${n}"`);
-		}
-
 		return result;
 	}
 
