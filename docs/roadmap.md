@@ -2,7 +2,7 @@
 
 This document tracks the current status of platform support and planned features. It is updated with each release.
 
-**Current version: v0.5.0 (unreleased)** — Last updated: 2026-02-23
+**Current version: v0.5.0** — Last updated: 2026-02-23
 
 ---
 
@@ -57,7 +57,7 @@ This document tracks the current status of platform support and planned features
 
 | Version | What shipped |
 |---------|-------------|
-| v0.5.0 | Edit mount in-place (Edit button); drag-drop reorder in settings; "Move mount to…" context-menu on mount root folders |
+| v0.5.0 | Edit mount in-place; drag-drop reorder in settings; "Move mount to…" context menu; Browse-to-ignore picker; path-relative ignore patterns; instant file-explorer refresh on ignore add; CI fixed (ESLint flat config + typescript-eslint v8) |
 | v0.4.4 | Platform support documentation; macOS marked untested (not unimplemented); mobile sandbox clarification |
 | v0.4.3 | Image/PDF rendering via `data:` URIs; rename race fix (2s poll); 300ms debounce for rapid saves; OneDrive cloud placeholder detection; PathMapper O(N) lookup cache |
 | v0.4.2 | FileWatcher hardening (symlink escape fix, event string, watcher restart, 20 unit tests); 0 npm audit vulnerabilities |
