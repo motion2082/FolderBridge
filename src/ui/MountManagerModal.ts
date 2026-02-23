@@ -134,6 +134,11 @@ export class MountManagerModal extends Modal {
 	private readOnly = false;
 	private label = '';
 	private useFolderNameAsLabel = false;
+	// Advanced (per-mount watcher + performance)
+	private watcherDebounceMs: number | undefined = undefined;
+	private watcherUsePolling = false;
+	private watcherPollingIntervalMs: number | undefined = undefined;
+	private maxFiles: number | undefined = undefined;
 
 	// ── Component references for programmatic updates ────────────────────────
 	private virtualPathText: TextComponent | null = null;
@@ -151,6 +156,10 @@ export class MountManagerModal extends Modal {
 			this.realPath = editMount.realPath;
 			this.readOnly = editMount.readOnly;
 			this.label = editMount.label ?? '';
+			this.watcherDebounceMs = editMount.watcherDebounceMs;
+			this.watcherUsePolling = editMount.watcherUsePolling ?? false;
+			this.watcherPollingIntervalMs = editMount.watcherPollingIntervalMs;
+			this.maxFiles = editMount.maxFiles;
 		}
 	}
 
@@ -312,7 +321,87 @@ export class MountManagerModal extends Modal {
 			.addToggle(toggle => toggle
 				.setValue(this.readOnly)
 				.onChange(val => { this.readOnly = val; }));
+		// ── Advanced (collapsible) ─────────────────────────────────────────────
+		const details = contentEl.createEl('details', { cls: 'folderbridge-advanced' });
+		details.style.marginTop = '12px';
+		details.style.marginBottom = '8px';
+		details.style.border = '1px solid var(--background-modifier-border)';
+		details.style.borderRadius = '4px';
+		details.style.padding = '0 10px';
+		const summary = details.createEl('summary', { text: 'Advanced settings' });
+		summary.style.cursor = 'pointer';
+		summary.style.padding = '8px 0';
+		summary.style.fontWeight = '600';
+		summary.style.color = 'var(--text-muted)';
 
+		const advancedContainer = details.createDiv();
+		advancedContainer.style.paddingBottom = '8px';
+
+		new Setting(advancedContainer)
+			.setName('Debounce threshold (ms)')
+			.setDesc('How long to wait after the last change event before notifying Obsidian. Increase for editors that save very frequently. (Default: 300)')
+			.addText(text => {
+				text.inputEl.type = 'number';
+				text.inputEl.min = '50';
+				text.inputEl.max = '5000';
+				text.inputEl.style.width = '80px';
+				text.setPlaceholder('300')
+					.setValue(this.watcherDebounceMs != null ? String(this.watcherDebounceMs) : '')
+					.onChange(val => {
+						const n = parseInt(val, 10);
+						this.watcherDebounceMs = isNaN(n) || n <= 0 ? undefined : Math.min(5000, Math.max(50, n));
+					});
+			});
+
+		let pollingIntervalSetting: Setting | null = null;
+
+		const showHidePollingInterval = (show: boolean) => {
+			if (pollingIntervalSetting) {
+				pollingIntervalSetting.settingEl.style.display = show ? '' : 'none';
+			}
+		};
+
+		new Setting(advancedContainer)
+			.setName('Use polling')
+			.setDesc('Poll for changes instead of native OS events. Required for NAS and network drives that do not support inotify / ReadDirectoryChangesW.')
+			.addToggle(toggle => toggle
+				.setValue(this.watcherUsePolling)
+				.onChange(val => {
+					this.watcherUsePolling = val;
+					showHidePollingInterval(val);
+				}));
+
+		pollingIntervalSetting = new Setting(advancedContainer)
+			.setName('Polling interval (ms)')
+			.setDesc('How often to poll the filesystem for changes. Only effective when "Use polling" is on. (Default: 2000)')
+			.addText(text => {
+				text.inputEl.type = 'number';
+				text.inputEl.min = '500';
+				text.inputEl.max = '60000';
+				text.inputEl.style.width = '80px';
+				text.setPlaceholder('2000')
+					.setValue(this.watcherPollingIntervalMs != null ? String(this.watcherPollingIntervalMs) : '')
+					.onChange(val => {
+						const n = parseInt(val, 10);
+						this.watcherPollingIntervalMs = isNaN(n) || n <= 0 ? undefined : Math.min(60000, Math.max(500, n));
+					});
+			});
+		showHidePollingInterval(this.watcherUsePolling);
+
+		new Setting(advancedContainer)
+			.setName('Max files (scan limit)')
+			.setDesc('Stop the initial vault scan after this many items. Leave blank for unlimited. Use this to keep Obsidian responsive with very large mounts.')
+			.addText(text => {
+				text.inputEl.type = 'number';
+				text.inputEl.min = '0';
+				text.inputEl.style.width = '100px';
+				text.setPlaceholder('unlimited')
+					.setValue(this.maxFiles != null ? String(this.maxFiles) : '')
+					.onChange(val => {
+						const n = parseInt(val, 10);
+						this.maxFiles = isNaN(n) || n <= 0 ? undefined : n;
+					});
+			});
 		// ── Action buttons ─────────────────────────────────────────────────
 		new Setting(contentEl)
 			.addButton(btn => btn
@@ -408,6 +497,10 @@ export class MountManagerModal extends Modal {
 				enabled: this.editMount ? this.editMount.enabled : true,
 				readOnly: this.readOnly,
 				label: this.label || undefined,
+				watcherDebounceMs: this.watcherDebounceMs,
+				watcherUsePolling: this.watcherUsePolling || undefined,
+				watcherPollingIntervalMs: this.watcherUsePolling ? this.watcherPollingIntervalMs : undefined,
+				maxFiles: this.maxFiles,
 			},
 			this.editMount?.id,
 		);

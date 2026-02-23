@@ -17,7 +17,7 @@ export class FileWatcher {
      * are coalesced into a single vault notification.
      */
     private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
-    private static readonly DEBOUNCE_MS = 300;
+    private static readonly DEFAULT_DEBOUNCE_MS = 300;
 
     constructor(app: App, pathMapper: PathMapper, isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean) {
         this.app = app;
@@ -63,6 +63,10 @@ export class FileWatcher {
             followSymlinks: false,
             ignoreInitial: true, // Don't trigger 'add' events for existing files on startup
             persistent: true,
+            // Per-mount polling override (useful for network drives / NAS that don't
+            // support native inotify / kqueue / ReadDirectoryChangesW events)
+            usePolling: mount.watcherUsePolling ?? false,
+            interval: mount.watcherPollingIntervalMs ?? 2000,
             awaitWriteFinish: {
                 stabilityThreshold: 500,
                 pollInterval: 100
@@ -122,12 +126,13 @@ export class FileWatcher {
         }
         // Cancel any pending notification for this exact path and schedule a
         // fresh one — timer resets on every write, firing only after the last.
+        const debounceMs = mount.watcherDebounceMs ?? FileWatcher.DEFAULT_DEBOUNCE_MS;
         const existing = this.debounceTimers.get(realPath);
         if (existing !== undefined) clearTimeout(existing);
         const timer = setTimeout(() => {
             this.debounceTimers.delete(realPath);
             void this.dispatchEvent(eventType, realPath, mount);
-        }, FileWatcher.DEBOUNCE_MS);
+        }, debounceMs);
         this.debounceTimers.set(realPath, timer);
     }
 

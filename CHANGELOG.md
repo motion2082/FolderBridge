@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-23
+
+### Added
+- **Per-mount debounce threshold**: Each mount can now specify its own debounce window for file-change events (50–5000 ms). Useful for editors that flush saves very rapidly. Configured in the new "Advanced settings" collapsible section of the mount modal.
+- **Per-mount polling mode**: A "Use polling" toggle replaces native OS filesystem events with interval-based polling for a specific mount. Required for NAS and network shares that do not support inotify / ReadDirectoryChangesW. Polling interval (500–60 000 ms) is also configurable per mount.
+- **Max files (scan limit)**: An optional item cap stops the initial vault scan early for very large mounts, keeping Obsidian responsive. When the limit is hit, a Notice links to the setting. Leave blank for unlimited (the historic default).
+- **Advanced settings section** in the Add/Edit Mount modal: the three settings above are grouped in a collapsible `<details>` block so the modal stays clean for typical usage.
+
 ## [0.6.0] - 2026-02-23
 
 ### Added

@@ -12,6 +12,11 @@ export interface MountPoint {
 	deviceId?: string;     // The device ID that created this mount (for sync compatibility)
 	deviceOverrides?: Record<string, string>; // Map of deviceId -> realPath override
 	ignoreList?: string[]; // List of file/folder names to ignore for this specific mount
+	// Per-mount watcher settings (all optional; fall back to built-in defaults)
+	watcherDebounceMs?: number;       // Debounce threshold for change events (default 300 ms)
+	watcherUsePolling?: boolean;      // Use polling instead of native fs events (for NAS/network drives)
+	watcherPollingIntervalMs?: number; // Polling interval in ms (default 2000; only used when usePolling)
+	maxFiles?: number;                // Cap initial scan at this many files (0 = unlimited)
 }
 
 export interface FolderBridgeSettings {

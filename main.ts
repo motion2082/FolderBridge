@@ -520,10 +520,13 @@ export default class FolderBridgePlugin extends Plugin {
 		let fileCount = 0;
 		let folderCount = 0;
 		let isHuge = false;
+		const scanLimit = mount.maxFiles ?? 0; // 0 = unlimited
+		let scanLimitHit = false;
 
 		const notice = new Notice(`FolderBridge: Scanning and mounting "${mount.virtualPath}"...`, 0);
 
 		const recursivelyNotifyVault = async (folderPath: string) => {
+			if (scanLimitHit) return;
 			try {
 				const list = await this.app.vault.adapter.list(folderPath);
 
@@ -531,6 +534,8 @@ export default class FolderBridgePlugin extends Plugin {
 				await new Promise(resolve => setTimeout(resolve, 0));
 
 				for (const folder of list.folders) {
+					if (scanLimitHit) return;
+
 					const folderName = folder.split('/').pop() || '';
 					const mountVirtual = normalizePath(mount.virtualPath);
 					const folderMountRelPath = folder.startsWith(mountVirtual + '/')
@@ -546,6 +551,10 @@ export default class FolderBridgePlugin extends Plugin {
 					if (!this.app.vault.getAbstractFileByPath(folder)) {
 						await vault.onChange('folder-created', folder, null, null);
 						folderCount++;
+						if (scanLimit > 0 && fileCount + folderCount >= scanLimit) {
+							scanLimitHit = true;
+							return;
+						}
 					}
 
 					if (folderCount + fileCount > 1000 && !isHuge) {
@@ -556,6 +565,8 @@ export default class FolderBridgePlugin extends Plugin {
 					await recursivelyNotifyVault(folder);
 				}
 				for (let i = 0; i < list.files.length; i++) {
+					if (scanLimitHit) break;
+
 					const file = list.files[i];
 					// Yield every 100 files to prevent locking up the UI on massive flat folders
 					if (i > 0 && i % 100 === 0) {
@@ -578,6 +589,10 @@ export default class FolderBridgePlugin extends Plugin {
 						const stat = await this.app.vault.adapter.stat(file);
 						await vault.onChange('file-created', file, null, stat);
 						fileCount++;
+						if (scanLimit > 0 && fileCount + folderCount >= scanLimit) {
+							scanLimitHit = true;
+							break;
+						}
 					}
 				}
 			} catch (e) {
@@ -587,6 +602,13 @@ export default class FolderBridgePlugin extends Plugin {
 
 		await recursivelyNotifyVault(normalizePath(mount.virtualPath));
 		notice.hide();
+		if (scanLimitHit) {
+			new Notice(
+				`FolderBridge: Scan limit (${scanLimit.toLocaleString()} items) reached for "${mount.virtualPath}". ` +
+				`Increase "Max files" in mount Advanced settings to surface more.`,
+				10000
+			);
+		}
 		new Notice(`FolderBridge: Mounted ${folderCount} folders and ${fileCount} files in "${mount.virtualPath}"`);
 		try {
 			await vault.onChange('raw', normalizePath(mount.virtualPath), null, null);
