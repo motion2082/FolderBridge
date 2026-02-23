@@ -14,10 +14,28 @@ export class PathMapper {
 	private mounts: MountPoint[] = [];
 	private currentDeviceId: string = '';
 
+	/**
+	 * Pre-sorted, pre-normalized cache rebuilt by update().
+	 * Sorted descending by normalizedVirtualPath.length so that the
+	 * most-specific (longest) mount always wins when paths overlap.
+	 * Avoids allocating a new sorted array and re-calling normalizePath
+	 * on every getMountForPath() invocation (which fires on every I/O op).
+	 */
+	private sortedMountCache: ReadonlyArray<{
+		mount: MountPoint;
+		normalizedVirtualPath: string;
+	}> = [];
+
 	/** Replace the active mount list (call after settings change). */
 	update(mounts: MountPoint[], deviceId: string = ''): void {
 		this.currentDeviceId = deviceId;
 		this.mounts = mounts.filter(m => m.enabled);
+		// Build a sorted, pre-normalized lookup cache so hot-path methods
+		// (getMountForPath, getMountByVirtualPath, …) never sort or normalize
+		// inside their loops.
+		this.sortedMountCache = this.mounts
+			.map(m => ({ mount: m, normalizedVirtualPath: normalizePath(m.virtualPath) }))
+			.sort((a, b) => b.normalizedVirtualPath.length - a.normalizedVirtualPath.length);
 	}
 
 	getMounts(): MountPoint[] {
@@ -41,7 +59,7 @@ export class PathMapper {
 	 */
 	getMountByVirtualPath(virtualPath: string): MountPoint | undefined {
 		const n = normalizePath(virtualPath);
-		return this.mounts.find(m => normalizePath(m.virtualPath) === n);
+		return this.sortedMountCache.find(({ normalizedVirtualPath }) => normalizedVirtualPath === n)?.mount;
 	}
 
 	/**
@@ -51,17 +69,11 @@ export class PathMapper {
 	 */
 	getMountForPath(virtualPath: string): MountPoint | undefined {
 		const n = normalizePath(virtualPath);
-
-		// Sort by virtualPath length descending so the most-specific mount wins
-		const sorted = [...this.mounts].sort(
-			(a, b) => b.virtualPath.length - a.virtualPath.length
-		);
-
-		const result = sorted.find(m => {
-			const mv = normalizePath(m.virtualPath);
-			return n === mv || n.startsWith(mv + '/');
-		});
-		return result;
+		// sortedMountCache is already sorted longest-first and pre-normalized,
+		// so no allocation or per-entry normalizePath() needed here.
+		return this.sortedMountCache.find(
+			({ normalizedVirtualPath: mv }) => n === mv || n.startsWith(mv + '/')
+		)?.mount;
 	}
 
 	/** True if virtualPath is a mount root or inside a mount. */
@@ -106,8 +118,7 @@ export class PathMapper {
 		const parent = parentVirtualPath === '' ? '' : normalizePath(parentVirtualPath);
 		const result: string[] = [];
 
-		for (const m of this.mounts) {
-			const mv = normalizePath(m.virtualPath);
+		for (const { normalizedVirtualPath: mv } of this.sortedMountCache) {
 			if (parent === '') {
 				// Root: return the first path component of each mount so that
 				// intermediate virtual folders (e.g. "Projects" for a mount at
@@ -139,9 +150,8 @@ export class PathMapper {
 	 */
 	hasMountsUnder(virtualPath: string): boolean {
 		const n = virtualPath === '' ? '' : normalizePath(virtualPath);
-		return this.mounts.some(m => {
-			const mv = normalizePath(m.virtualPath);
-			return mv === n || mv.startsWith(n === '' ? '' : n + '/');
-		});
+		return this.sortedMountCache.some(
+			({ normalizedVirtualPath: mv }) => mv === n || mv.startsWith(n === '' ? '' : n + '/')
+		);
 	}
 }
