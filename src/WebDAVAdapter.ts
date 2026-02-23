@@ -114,12 +114,11 @@ export class WebDAVAdapter {
     // list
     // ------------------------------------------------------------------
 
-    async list(serverPath: string, virtualParentPath: string, mount: MountPoint): Promise<{ files: string[]; folders: string[] }> {
+    async list(serverPath: string, virtualParentPath: string, _mount: MountPoint): Promise<{ files: string[]; folders: string[] }> {
         const files: string[] = [];
         const folders: string[] = [];
         try {
             const contents = await this.client.getDirectoryContents(this.toServerPath(serverPath)) as FileStat[];
-            const mountVirtual = normalizePath(mount.virtualPath);
             for (const item of contents) {
                 const name = path.basename(item.filename.replace(/\//g, path.sep));
                 const virtualChild = virtualParentPath
