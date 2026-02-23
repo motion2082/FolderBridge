@@ -656,6 +656,51 @@ export default class FolderBridgePlugin extends Plugin {
 	}
 
 	// ------------------------------------------------------------------
+	// Ignore-list helpers
+	// ------------------------------------------------------------------
+
+	/**
+	 * Rebuild the ignore cache and immediately remove from Obsidian's vault
+	 * index any files/folders under `mount` that are now matched by the
+	 * current ignore list.  Call this after adding a new pattern so the file
+	 * explorer hides matching items without requiring a restart.
+	 */
+	async applyIgnoreListToVault(mount: MountPoint): Promise<void> {
+		this.updateIgnoreCache();
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const vault = this.app.vault as any;
+		if (typeof vault.onChange !== 'function') return;
+
+		const mountPath = normalizePath(mount.virtualPath);
+		const mountFolder = this.app.vault.getAbstractFileByPath(mountPath);
+		if (!(mountFolder instanceof TFolder)) return;
+
+		const recursivelyRemoveIgnored = async (folder: TFolder): Promise<void> => {
+			for (const child of [...folder.children]) {
+				const mountRelative = child.path.startsWith(mountPath + '/')
+					? child.path.slice(mountPath.length + 1)
+					: child.path;
+				if (this.isNameIgnored(child.name, mount, mountRelative)) {
+					try {
+						if (child instanceof TFolder) {
+							await vault.onChange('folder-removed', child.path, null, null);
+						} else {
+							await vault.onChange('file-removed', child.path, null, null);
+						}
+					} catch (e) {
+						console.debug('FolderBridge: Failed to remove ignored item from vault view', e);
+					}
+				} else if (child instanceof TFolder) {
+					await recursivelyRemoveIgnored(child);
+				}
+			}
+		};
+
+		await recursivelyRemoveIgnored(mountFolder);
+	}
+
+	// ------------------------------------------------------------------
 	// Status bar
 	// ------------------------------------------------------------------
 
@@ -924,6 +969,9 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 							if (!selectedMount.ignoreList.includes(val)) {
 								selectedMount.ignoreList.push(val);
 								await this.plugin.saveSettings();
+								// Rebuild cache and remove newly-ignored items from the file explorer
+								await this.plugin.applyIgnoreListToVault(selectedMount);
+								inputEl.value = '';
 								renderIgnoreList();
 							}
 						}
