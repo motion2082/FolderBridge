@@ -7,6 +7,7 @@ import { MountManagerModal, getMountStatus, browseFolderOnDisk, VaultFolderPicke
 import { MountRootDeleteModal } from './src/ui/MountRootDeleteModal';
 import { getPlatform, realPathToResourceUrl, tryReadAsDataUri } from './src/OSHelpers';
 import * as path from 'path';
+import * as fs from 'fs';
 import { FileWatcher } from './src/FileWatcher';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,10 @@ export default class FolderBridgePlugin extends Plugin {
 	// Preserve original vault.getResourcePath so we can restore it on unload
 	private originalVaultGetResourcePath: unknown = null;
 	statusBarItem: HTMLElement | null = null;
+
+	/** Tracks reachability per mount.id; populated by the 30-second health-check loop. */
+	mountHealthMap = new Map<string, boolean>();
+	private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -145,12 +150,19 @@ export default class FolderBridgePlugin extends Plugin {
 			for (const mount of this.settings.mountPoints.filter(m => m.enabled && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts))) {
 				await this.notifyVaultMountAdded(mount);
 			}
+			// Start background reachability checks after initial mount injection
+			this.startHealthChecks();
 		});
 
 		console.log(`FolderBridge loaded (${getPlatform()}, ${this.settings.mountPoints.filter(m => m.enabled && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts)).length} active mounts on this device)`);
 	}
 
 	onunload() {
+		// Stop background health-check loop before watcher so no stale notices fire
+		if (this.healthCheckInterval !== null) {
+			clearInterval(this.healthCheckInterval);
+			this.healthCheckInterval = null;
+		}
 		// [FEATURE_20260222] Stop all file watchers
 		this.fileWatcher?.stopAll();
 
@@ -701,13 +713,104 @@ export default class FolderBridgePlugin extends Plugin {
 	}
 
 	// ------------------------------------------------------------------
+	// Mount health checking
+	// ------------------------------------------------------------------
+
+	/**
+	 * Start the background 30-second reachability loop.
+	 * Runs one immediate check on call, then fires every CHECK_INTERVAL_MS.
+	 * When reachability changes, fires a Notice and refreshes the status bar.
+	 */
+	private startHealthChecks(): void {
+		const CHECK_INTERVAL_MS = 30_000;
+
+		const runCheck = async () => {
+			// Avoid churning I/O while Obsidian is in the background
+			if (typeof document !== 'undefined' && document.hidden) return;
+
+			const activeMounts = this.settings.mountPoints.filter(
+				m => m.enabled && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts)
+			);
+
+			let anyChanged = false;
+			for (const mount of activeMounts) {
+				const realPath = this.pathMapper.getEffectiveRealPath(mount);
+				let reachable = false;
+				try {
+					await fs.promises.access(realPath, fs.constants.F_OK);
+					reachable = true;
+				} catch {
+					reachable = false;
+				}
+				const prev = this.mountHealthMap.get(mount.id);
+				if (prev !== reachable) {
+					this.mountHealthMap.set(mount.id, reachable);
+					anyChanged = true;
+					if (!reachable && prev === true) {
+						new Notice(
+							`⚠️ FolderBridge: "${mount.label || mount.virtualPath}" is unreachable. ` +
+							`Check that the path exists and is accessible on this device.`,
+							8000
+						);
+					} else if (reachable && prev === false) {
+						new Notice(
+							`✓ FolderBridge: "${mount.label || mount.virtualPath}" is back online.`,
+							4000
+						);
+					}
+				}
+			}
+			if (anyChanged) this.updateStatusBar();
+		};
+
+		void runCheck(); // immediate first pass
+		this.healthCheckInterval = setInterval(() => void runCheck(), CHECK_INTERVAL_MS);
+	}
+
+	/**
+	 * Re-check whether mount's real path is accessible now.
+	 * If it is, remove stale vault-tree entries and re-inject the mount.
+	 * Called from the settings tab "Reconnect" button.
+	 */
+	async reconnectMount(mount: MountPoint): Promise<void> {
+		const realPath = this.pathMapper.getEffectiveRealPath(mount);
+		let reachable = false;
+		try {
+			await fs.promises.access(realPath, fs.constants.F_OK);
+			reachable = true;
+		} catch {
+			reachable = false;
+		}
+		this.mountHealthMap.set(mount.id, reachable);
+
+		if (!reachable) {
+			new Notice(`FolderBridge: "${mount.label || mount.virtualPath}" is still unreachable.`, 5000);
+			this.updateStatusBar();
+			return;
+		}
+
+		// Clean up any stale vault-tree remnants before re-injecting
+		await this.notifyVaultMountRemoved(mount);
+		await this.notifyVaultMountAdded(mount);
+		new Notice(`✓ FolderBridge: "${mount.label || mount.virtualPath}" reconnected successfully.`);
+		this.updateStatusBar();
+	}
+
+	// ------------------------------------------------------------------
 	// Status bar
 	// ------------------------------------------------------------------
 
 	updateStatusBar(): void {
 		if (!this.statusBarItem) return;
 		const active = this.settings.mountPoints.filter(m => m.enabled).length;
-		this.statusBarItem.setText(`FolderBridge: ${active} mount${active !== 1 ? 's' : ''}`);
+		const unreachableCount = [...this.mountHealthMap.values()].filter(v => v === false).length;
+		if (unreachableCount > 0) {
+			this.statusBarItem.setText(`⚠️ FolderBridge: ${unreachableCount} unreachable`);
+			this.statusBarItem.style.color = 'var(--text-warning)';
+		} else {
+			this.statusBarItem.setText(`FolderBridge: ${active} mount${active !== 1 ? 's' : ''}`);
+			this.statusBarItem.style.color = '';
+		}
 	}
 
 	// ------------------------------------------------------------------
@@ -1218,14 +1321,31 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			this.display();
 		});
 
+		// ── Reconnect button (shown immediately when mount is known unreachable) ────
+		if (canEnable && this.plugin.mountHealthMap.get(mount.id) === false) {
+			setting.addButton(btn => btn
+				.setButtonText('⚠️ Reconnect')
+				.setWarning()
+				.onClick(async () => {
+					await this.plugin.reconnectMount(mount);
+					this.display();
+				}));
+		}
+
 		// ── Async status badge ───────────────────────────────────────────────
 		if (canEnable) {
 			getMountStatus(mount).then(status => {
-				const badge = status.reachable
-					? (status.readOnly ? '[read-only]' : '[writable]')
-					: `[error: ${status.error ?? 'unreachable'}]`;
-				const prefix = status.reachable ? '✓' : '✗';
+				const isUnreachable = this.plugin.mountHealthMap.get(mount.id) === false;
+				const badge = isUnreachable
+					? '[unreachable]'
+					: status.reachable
+						? (status.readOnly ? '[read-only]' : '[writable]')
+						: `[error: ${status.error ?? 'unreachable'}]`;
+				const prefix = (isUnreachable || !status.reachable) ? '✗' : '✓';
 				setting.setName(`${prefix} ${displayName} ${badge}`);
+				if (isUnreachable || !status.reachable) {
+					setting.settingEl.style.borderLeft = '3px solid var(--text-warning)';
+				}
 			}).catch(() => { /* ignore render errors */ });
 		} else {
 			setting.setName(`[Other Device] ${displayName}`);

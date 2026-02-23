@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-23
+
+### Added
+- **Conflict resolution UI**: FolderBridge now performs a background reachability check every 30 seconds on all active mounts. When a mount goes unreachable (drive disconnected, network share dropped, cloud placeholder), a warning Notice fires immediately and the status bar turns orange showing the count of unreachable mounts.
+- **Reconnect button**: Each unreachable mount row in Settings shows a ⚠️ Reconnect button. Clicking it re-checks the path, re-injects the vault tree, and restarts the file watcher — no plugin reload required.
+- **Automatic back-online notice**: When a previously-unreachable mount becomes accessible again (drive reconnected, network restored), a confirmation Notice fires automatically on the next health-check cycle.
+- **Status bar health indicator**: The status bar item now turns orange and shows the count of unreachable mounts when any mount is down. Returns to normal colour when all are reachable.
+
 ## [0.5.0] - 2026-02-23
 
 ### Added
