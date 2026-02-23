@@ -4,6 +4,7 @@ import * as path from 'path';
 import { PathMapper } from './PathMapper';
 import { SecurityManager } from './SecurityManager';
 import { MountPoint } from './types';
+import { WebDAVAdapter } from './WebDAVAdapter';
 import {
 	realPathToResourceUrl,
 	tryReadAsDataUri,
@@ -33,6 +34,8 @@ export class VirtualAdapter {
 	private onMountRootDelete: (mount: MountPoint) => Promise<'unmount' | 'delete' | 'cancel'>;
 	private onMountRootMove: (mount: MountPoint, newVirtualPath: string) => Promise<void>;
 	private isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean;
+	/** WebDAV client instances keyed by mount.id, managed by the plugin. */
+	private webdavAdapters: Map<string, WebDAVAdapter> = new Map();
 
 	constructor(
 		original: unknown,
@@ -50,6 +53,16 @@ export class VirtualAdapter {
 		this.onMountRootDelete = onMountRootDelete;
 		this.onMountRootMove = onMountRootMove;
 		this.isIgnored = isIgnored;
+	}
+
+	/** Register (or replace) the WebDAV client for a mount. */
+	setWebDAVAdapter(mountId: string, adapter: WebDAVAdapter): void {
+		this.webdavAdapters.set(mountId, adapter);
+	}
+
+	/** Remove the WebDAV client for a mount (called on unmount). */
+	clearWebDAVAdapter(mountId: string): void {
+		this.webdavAdapters.delete(mountId);
 	}
 
 	/** Update dry-run mode without reloading the plugin. */
@@ -72,6 +85,24 @@ export class VirtualAdapter {
 	 */
 	private toReal(normalizedPath: string, mount: MountPoint): string {
 		return ensureLongPathPrefix(this.pathMapper.toRealPath(normalizedPath, mount));
+	}
+
+	/**
+	 * Translate a virtual vault path to a server-relative WebDAV path.
+	 * Unlike toReal(), this never applies the Windows long-path prefix and
+	 * always uses forward slashes, as required by WebDAV URLs.
+	 */
+	private toServerPath(normalizedPath: string, mount: MountPoint): string {
+		return this.pathMapper.toRealPath(normalizedPath, mount).replace(/\\/g, '/');
+	}
+
+	/**
+	 * Return the WebDAVAdapter for a mount if it is a WebDAV mount, or null
+	 * if it is a local mount (the typical case).
+	 */
+	private getWebDAV(mount: MountPoint): WebDAVAdapter | null {
+		if (mount.mountType !== 'webdav') return null;
+		return this.webdavAdapters.get(mount.id) ?? null;
 	}
 
 	// ------------------------------------------------------------------
@@ -131,6 +162,8 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (this.isPathIgnored(normalizedPath, mount)) return false;
+			const webdav = this.getWebDAV(mount);
+			if (webdav) return await webdav.exists(this.toServerPath(normalizedPath, mount));
 			const realPath = this.toReal(normalizedPath, mount);
 			try {
 				await fs.promises.access(realPath, fs.constants.F_OK);
@@ -159,6 +192,8 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (this.isPathIgnored(normalizedPath, mount)) return null;
+			const webdav = this.getWebDAV(mount);
+			if (webdav) return await webdav.stat(this.toServerPath(normalizedPath, mount));
 			const realPath = this.toReal(normalizedPath, mount);
 			try {
 				const s = await fs.promises.stat(realPath);
@@ -201,6 +236,11 @@ export class VirtualAdapter {
 			if (this.isPathIgnored(normalizedPath, mount)) {
 				console.debug(`[FolderBridge] list: path is ignored, returning empty`);
 				return { files: [], folders: [] };
+			}
+			const webdav = this.getWebDAV(mount);
+			if (webdav) {
+				const sp = this.toServerPath(normalizedPath, mount);
+				return await webdav.list(sp, normalizedPath, mount);
 			}
 			const realPath = this.toReal(normalizedPath, mount);
 			console.debug(`[FolderBridge] list: resolved to real path "${realPath}"`);
@@ -314,6 +354,8 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot read ignored path "${normalizedPath}"`);
+			const webdav = this.getWebDAV(mount);
+			if (webdav) return await webdav.readText(this.toServerPath(normalizedPath, mount));
 			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
 			try {
@@ -345,6 +387,8 @@ export class VirtualAdapter {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot read ignored path "${normalizedPath}"`);
+			const webdav = this.getWebDAV(mount);
+			if (webdav) return await webdav.readBinary(this.toServerPath(normalizedPath, mount));
 			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
 			try {
@@ -379,7 +423,12 @@ export class VirtualAdapter {
 		if (mount) {
 			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot write to ignored path "${normalizedPath}"`);
-
+			const webdav = this.getWebDAV(mount);
+			if (webdav) {
+				if (this.dryRun) { console.log(`[Folder Bridge DryRun] webdav write → ${this.toServerPath(normalizedPath, mount)}`); return; }
+				await webdav.writeText(this.toServerPath(normalizedPath, mount), data);
+				return;
+			}
 			const realPath = this.toReal(normalizedPath, mount);
 
 			this.assertAllowed(realPath);
@@ -403,6 +452,12 @@ export class VirtualAdapter {
 		if (mount) {
 			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot write to ignored path "${normalizedPath}"`);
+			const webdav = this.getWebDAV(mount);
+			if (webdav) {
+				if (this.dryRun) { console.log(`[Folder Bridge DryRun] webdav writeBinary → ${this.toServerPath(normalizedPath, mount)}`); return; }
+				await webdav.writeBinary(this.toServerPath(normalizedPath, mount), data);
+				return;
+			}
 			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
 			this.assertNotReserved(realPath);
@@ -422,6 +477,12 @@ export class VirtualAdapter {
 		if (mount) {
 			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot append to ignored path "${normalizedPath}"`);
+			const webdav = this.getWebDAV(mount);
+			if (webdav) {
+				if (this.dryRun) { console.log(`[Folder Bridge DryRun] webdav append → ${this.toServerPath(normalizedPath, mount)}`); return; }
+				await webdav.append(this.toServerPath(normalizedPath, mount), data);
+				return;
+			}
 			const realPath = this.toReal(normalizedPath, mount);
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] append → ${realPath}`); return; }
@@ -479,6 +540,13 @@ export class VirtualAdapter {
 
 			const realPath = this.toReal(normalizedPath, mount);
 
+			const webdav = this.getWebDAV(mount);
+			if (webdav) {
+				if (this.dryRun) { console.log(`[FolderBridge DryRun] mkdir (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return; }
+				await webdav.mkdir(this.toServerPath(normalizedPath, mount));
+				return;
+			}
+
 			this.assertAllowed(realPath);
 			this.assertNotReserved(realPath);
 
@@ -529,6 +597,12 @@ export class VirtualAdapter {
 			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot trash ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
+			const webdavTS = this.getWebDAV(mount);
+			if (webdavTS) {
+				if (this.dryRun) { console.log(`[FolderBridge DryRun] trashSystem (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return true; }
+				await webdavTS.remove(this.toServerPath(normalizedPath, mount));
+				return true;
+			}
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] trashSystem → ${realPath}`); return true; }
 			try {
@@ -557,6 +631,12 @@ export class VirtualAdapter {
 			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot trash ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
+			const webdavTL = this.getWebDAV(mount);
+			if (webdavTL) {
+				if (this.dryRun) { console.log(`[FolderBridge DryRun] trashLocal (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return; }
+				await webdavTL.remove(this.toServerPath(normalizedPath, mount));
+				return;
+			}
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] trashLocal → ${realPath}`); return; }
 			await fs.promises.rm(realPath, { recursive: true, force: true });
@@ -577,6 +657,12 @@ export class VirtualAdapter {
 			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot remove ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
+			const webdavRD = this.getWebDAV(mount);
+			if (webdavRD) {
+				if (this.dryRun) { console.log(`[FolderBridge DryRun] rmdir (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return; }
+				await webdavRD.remove(this.toServerPath(normalizedPath, mount));
+				return;
+			}
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] rmdir → ${realPath}`); return; }
 			await fs.promises.rm(realPath, { recursive: true, force: true });
@@ -599,6 +685,12 @@ export class VirtualAdapter {
 			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot remove ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
+			const webdavRM = this.getWebDAV(mount);
+			if (webdavRM) {
+				if (this.dryRun) { console.log(`[FolderBridge DryRun] remove (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return; }
+				await webdavRM.remove(this.toServerPath(normalizedPath, mount));
+				return;
+			}
 			this.assertAllowed(realPath);
 			if (this.dryRun) { console.log(`[FolderBridge DryRun] remove → ${realPath}`); return; }
 			await fs.promises.rm(realPath, { recursive: true, force: true });
@@ -638,6 +730,12 @@ export class VirtualAdapter {
 			}
 			const srcReal = this.toReal(normalizedPath, srcMount);
 			const dstReal = this.toReal(newNormalizedPath, dstMount);
+			const webdavRN = this.getWebDAV(srcMount);
+			if (webdavRN) {
+				if (this.dryRun) { console.log(`[FolderBridge DryRun] rename (webdav) ${this.toServerPath(normalizedPath, srcMount)} → ${this.toServerPath(newNormalizedPath, dstMount)}`); return; }
+				await webdavRN.rename(this.toServerPath(normalizedPath, srcMount), this.toServerPath(newNormalizedPath, dstMount));
+				return;
+			}
 			this.assertAllowed(srcReal);
 			this.assertAllowed(dstReal);
 			this.assertNotReserved(dstReal);
@@ -730,13 +828,26 @@ export class VirtualAdapter {
 		}
 
 		try {
+			const srcWebDAV = srcMount ? this.getWebDAV(srcMount) : null;
+			const dstWebDAV = dstMount ? this.getWebDAV(dstMount) : null;
+
+			// Server-side copy when both ends are on the same WebDAV mount
+			if (srcWebDAV && dstWebDAV && srcMount!.id === dstMount!.id) {
+				await srcWebDAV.copy(this.toServerPath(normalizedPath, srcMount!), this.toServerPath(newNormalizedPath, dstMount!));
+				return;
+			}
+
 			// Read from source
-			const content: Buffer = srcMount
-				? await fs.promises.readFile(this.toReal(normalizedPath, srcMount))
-				: Buffer.from(await this.orig().readBinary(normalizedPath) as ArrayBuffer);
+			const content: Buffer = srcWebDAV
+				? Buffer.from(await srcWebDAV.readBinary(this.toServerPath(normalizedPath, srcMount!)))
+				: srcMount
+					? await fs.promises.readFile(this.toReal(normalizedPath, srcMount))
+					: Buffer.from(await this.orig().readBinary(normalizedPath) as ArrayBuffer);
 
 			// Write to destination
-			if (dstMount) {
+			if (dstWebDAV) {
+				await dstWebDAV.writeBinary(this.toServerPath(newNormalizedPath, dstMount!), content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength) as ArrayBuffer);
+			} else if (dstMount) {
 				const dstReal = this.toReal(newNormalizedPath, dstMount);
 				this.assertAllowed(dstReal);
 				this.assertNotReserved(dstReal);

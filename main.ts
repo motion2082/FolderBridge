@@ -9,6 +9,7 @@ import { getPlatform, realPathToResourceUrl, tryReadAsDataUri } from './src/OSHe
 import * as path from 'path';
 import * as fs from 'fs';
 import { FileWatcher } from './src/FileWatcher';
+import { WebDAVAdapter } from './src/WebDAVAdapter';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -147,7 +148,15 @@ export default class FolderBridgePlugin extends Plugin {
 		this.app.workspace.onLayoutReady(async () => {
 			// [BUGFIX_20260222] Removed debug log for resource path format
 
-			for (const mount of this.settings.mountPoints.filter(m => m.enabled && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts))) {
+			const activeMounts = this.settings.mountPoints.filter(m => m.enabled && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts));
+
+			// Register WebDAV adapters for all WebDAV mounts that have a saved password
+			for (const mount of activeMounts.filter(m => m.mountType === 'webdav')) {
+				const adapter = WebDAVAdapter.fromMount(mount);
+				if (adapter) this.virtualAdapter?.setWebDAVAdapter(mount.id, adapter);
+			}
+
+			for (const mount of activeMounts) {
 				await this.notifyVaultMountAdded(mount);
 			}
 			// Start background reachability checks after initial mount injection
@@ -353,31 +362,45 @@ export default class FolderBridgePlugin extends Plugin {
 	// ------------------------------------------------------------------
 
 	async addMount(mountData: Omit<MountPoint, 'id'>): Promise<void> {
-		// Validate against existing mounts before inserting
-		const error = this.security.validateMount(mountData, this.settings.mountPoints);
-		if (error) {
-			new Notice(`Folder Bridge: ${error}`);
-			return;
+		const isWebDAV = (mountData as MountPoint).mountType === 'webdav';
+
+		// Validate against existing mounts before inserting (local mounts only —
+		// WebDAV realPath is a server-relative path, not an absolute local path)
+		if (!isWebDAV) {
+			const error = this.security.validateMount(mountData, this.settings.mountPoints);
+			if (error) {
+				new Notice(`Folder Bridge: ${error}`);
+				return;
+			}
+			// Surface advisory warnings (UNC paths, real-path overlaps)
+			const warnings = this.security.getPathWarnings(mountData.realPath, this.settings.mountPoints);
+			for (const w of warnings) {
+				new Notice(`Folder Bridge warning: ${w}`, 10_000);
+			}
 		}
 
-		// Surface non-blocking advisory warnings (e.g. UNC paths, real-path overlaps)
-		const warnings = this.security.getPathWarnings(mountData.realPath, this.settings.mountPoints);
-		for (const w of warnings) {
-			new Notice(`Folder Bridge warning: ${w}`, 10_000);
-		}
+		// Extract + strip transient password before persisting
+		const { webdavPassword, ...mountDataClean } = mountData as MountPoint;
 
 		const mount: MountPoint = {
-			...mountData,
+			...mountDataClean,
 			id: generateId(),
 			deviceId: this.settings.deviceId,
 			ignoreList: ['.git', 'node_modules', '.obsidian']
 		};
 		this.settings.mountPoints.push(mount);
 
-		// Register in allowlist if not already present
-		if (!this.settings.allowlist.includes(mount.realPath)) {
+		// Register in allowlist if not already present (local mounts only)
+		if (mount.mountType !== 'webdav' && !this.settings.allowlist.includes(mount.realPath)) {
 			this.settings.allowlist.push(mount.realPath);
 			this.security.allow(mount.realPath);
+		}
+
+		// Wire up WebDAV adapter (password saved to sessionStorage, never data.json)
+		if (mount.mountType === 'webdav') {
+			if (webdavPassword) WebDAVAdapter.savePassword(mount.id, webdavPassword);
+			const adapter = WebDAVAdapter.fromMount(mount);
+			if (adapter) this.virtualAdapter?.setWebDAVAdapter(mount.id, adapter);
 		}
 
 		await this.saveSettings();
@@ -385,7 +408,10 @@ export default class FolderBridgePlugin extends Plugin {
 		this.updateStatusBar();
 		await this.notifyVaultMountAdded(mount);
 
-		new Notice(`Folder Bridge: Mounted "${mount.realPath}" → "${mount.virtualPath}"`);
+		const mountLabel = mount.mountType === 'webdav'
+			? `"${mount.webdavUrl}" → "${mount.virtualPath}"`
+			: `"${mount.realPath}" → "${mount.virtualPath}"`;
+		new Notice(`Folder Bridge: Mounted ${mountLabel}`);
 	}
 
 	async removeMount(id: string): Promise<void> {
@@ -404,6 +430,12 @@ export default class FolderBridgePlugin extends Plugin {
 		if (!stillUsed) {
 			this.settings.allowlist = this.settings.allowlist.filter(p => p !== mount.realPath);
 			this.security.revoke(mount.realPath);
+		}
+
+		// Tear down WebDAV adapter and clear stored password
+		if (mount.mountType === 'webdav') {
+			this.virtualAdapter?.clearWebDAVAdapter(mount.id);
+			WebDAVAdapter.clearPassword(mount.id);
 		}
 
 		await this.saveSettings();
@@ -475,6 +507,19 @@ export default class FolderBridgePlugin extends Plugin {
 		if (realPathChanged && wasEnabled) {
 			this.fileWatcher?.stopWatching(oldMount);
 			this.fileWatcher?.startWatching(updatedMount);
+		}
+
+		// Recreate WebDAV adapter if any WebDAV fields changed
+		if (updatedMount.mountType === 'webdav') {
+			const { webdavPassword } = newData as MountPoint;
+			if (webdavPassword) WebDAVAdapter.savePassword(id, webdavPassword);
+			this.virtualAdapter?.clearWebDAVAdapter(id);
+			const adapter = WebDAVAdapter.fromMount(updatedMount);
+			if (adapter) this.virtualAdapter?.setWebDAVAdapter(id, adapter);
+		} else if (oldMount.mountType === 'webdav') {
+			// Mount type changed away from WebDAV — clean up
+			this.virtualAdapter?.clearWebDAVAdapter(id);
+			WebDAVAdapter.clearPassword(id);
 		}
 
 		new Notice(`Folder Bridge: Updated "${updatedMount.virtualPath}"`);
@@ -756,11 +801,18 @@ export default class FolderBridgePlugin extends Plugin {
 
 			let anyChanged = false;
 			for (const mount of activeMounts) {
-				const realPath = this.pathMapper.getEffectiveRealPath(mount);
 				let reachable = false;
 				try {
-					await fs.promises.access(realPath, fs.constants.F_OK);
-					reachable = true;
+					if (mount.mountType === 'webdav') {
+						const adapter = WebDAVAdapter.fromMount(mount);
+						if (adapter) {
+							reachable = await adapter.exists(mount.realPath);
+						}
+					} else {
+						const realPath = this.pathMapper.getEffectiveRealPath(mount);
+						await fs.promises.access(realPath, fs.constants.F_OK);
+						reachable = true;
+					}
 				} catch {
 					reachable = false;
 				}
@@ -795,11 +847,16 @@ export default class FolderBridgePlugin extends Plugin {
 	 * Called from the settings tab "Reconnect" button.
 	 */
 	async reconnectMount(mount: MountPoint): Promise<void> {
-		const realPath = this.pathMapper.getEffectiveRealPath(mount);
 		let reachable = false;
 		try {
-			await fs.promises.access(realPath, fs.constants.F_OK);
-			reachable = true;
+			if (mount.mountType === 'webdav') {
+				const adapter = WebDAVAdapter.fromMount(mount);
+				if (adapter) reachable = await adapter.exists(mount.realPath);
+			} else {
+				const realPath = this.pathMapper.getEffectiveRealPath(mount);
+				await fs.promises.access(realPath, fs.constants.F_OK);
+				reachable = true;
+			}
 		} catch {
 			reachable = false;
 		}
@@ -872,7 +929,18 @@ export default class FolderBridgePlugin extends Plugin {
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		// Strip transient webdavPassword field before persisting — it must never
+		// reach data.json.  We deep-clone only the mount points array to avoid
+		// mutating the live in-memory objects.
+		const dataToSave = {
+			...this.settings,
+			mountPoints: this.settings.mountPoints.map(m => {
+				// eslint-disable-next-line @typescript-eslint/no-unused-vars
+				const { webdavPassword: _pw, ...rest } = m;
+				return rest;
+			}),
+		};
+		await this.saveData(dataToSave);
 		this.updateIgnoreCache();
 	}
 }

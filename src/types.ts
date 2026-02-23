@@ -2,10 +2,12 @@
  * A single virtual mount point: maps a vault-relative virtual path
  * to an absolute real filesystem path.
  */
+export type MountType = 'local' | 'webdav';
+
 export interface MountPoint {
 	id: string;            // Unique identifier (generated at creation)
 	virtualPath: string;   // Normalized vault path, e.g. "Projects/Work"
-	realPath: string;      // Absolute OS path, e.g. "/home/user/Documents/Work"
+	realPath: string;      // Absolute OS path (local) OR server-relative path (webdav)
 	enabled: boolean;      // Whether the mount is currently active
 	readOnly: boolean;     // Block all write operations through this mount
 	label?: string;        // Optional human-readable display name
@@ -17,6 +19,14 @@ export interface MountPoint {
 	watcherUsePolling?: boolean;      // Use polling instead of native fs events (for NAS/network drives)
 	watcherPollingIntervalMs?: number; // Polling interval in ms (default 2000; only used when usePolling)
 	maxFiles?: number;                // Cap initial scan at this many files (0 = unlimited)
+	// WebDAV-specific (only set when mountType === 'webdav')
+	mountType?: MountType;            // 'local' (default) or 'webdav'
+	webdavUrl?: string;               // WebDAV server root URL, e.g. "https://mycloud.com/dav"
+	webdavUsername?: string;          // Basic-auth username (password stored in sessionStorage only)
+	/** TRANSIENT — never written to data.json.  Carries the password from the
+	 *  modal → addMount() / updateMount() so it can be saved to sessionStorage
+	 *  under the real (server-assigned) mount id. */
+	webdavPassword?: string;
 }
 
 export interface FolderBridgeSettings {

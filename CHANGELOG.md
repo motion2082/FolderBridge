@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-23
+
+### Added
+- **WebDAV support**: Mount any WebDAV server (Nextcloud, ownCloud, generic WebDAV) as a virtual vault folder. Configure the server URL, remote base path, username, and password in the Add/Edit Mount modal.
+- **Secure credential storage**: WebDAV passwords are stored in `sessionStorage` only — never written to `data.json` or synced to other devices. A password prompt appears on the next Obsidian launch.
+- **Mount type selector**: The Add/Edit Mount modal now shows a "Mount type" dropdown. Choosing "WebDAV" reveals the WebDAV fields; choosing "Local filesystem" shows the existing path/browse controls.
+- **WebDAV I/O path**: All VirtualAdapter operations (`read`, `write`, `stat`, `list`, `mkdir`, `rename`, `copy`, `remove`, `append`) are fully delegated to the WebDAV adapter when the mount is of type `webdav`. Server-side copy is used when both source and destination are on the same WebDAV mount.
+- **WebDAV health checks**: The 30-second background reachability check now uses an HTTP probe for WebDAV mounts instead of a local `fs.access()` call. The reconnect button also works for WebDAV.
+- **No file watcher for WebDAV**: WebDAV mounts skip the chokidar file watcher (HTTP has no equivalent of inotify). Changes made externally will appear on the next manual refresh.
+
 ## [0.7.0] - 2026-02-23
 
 ### Added

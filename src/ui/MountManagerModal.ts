@@ -1,6 +1,6 @@
 import { App, Modal, Notice, Setting, SuggestModal, TFolder, TextComponent, normalizePath } from 'obsidian';
 import * as path from 'path';
-import { MountPoint, MountStatus } from '../types';
+import { MountPoint, MountStatus, MountType } from '../types';
 import { SecurityManager } from '../SecurityManager';
 import { checkPathAccessible, isDirectory, getPlatform, isWSL } from '../OSHelpers';
 
@@ -129,11 +129,16 @@ export class MountManagerModal extends Modal {
 	private editMount: MountPoint | undefined;
 
 	// ── Form state ──────────────────────────────────────────────────────────
+	private mountType: MountType = 'local';
 	private virtualPath = '';
 	private realPath = '';
 	private readOnly = false;
 	private label = '';
 	private useFolderNameAsLabel = false;
+	// WebDAV fields (password never persisted to data.json)
+	private webdavUrl = '';
+	private webdavUsername = '';
+	private webdavPassword = '';
 	// Advanced (per-mount watcher + performance)
 	private watcherDebounceMs: number | undefined = undefined;
 	private watcherUsePolling = false;
@@ -152,10 +157,14 @@ export class MountManagerModal extends Modal {
 		this.editMount = editMount;
 		// Pre-populate state from existing mount
 		if (editMount) {
+			this.mountType = editMount.mountType ?? 'local';
 			this.virtualPath = editMount.virtualPath;
 			this.realPath = editMount.realPath;
 			this.readOnly = editMount.readOnly;
 			this.label = editMount.label ?? '';
+			this.webdavUrl = editMount.webdavUrl ?? '';
+			this.webdavUsername = editMount.webdavUsername ?? '';
+			// Password is never stored – leave blank; user re-enters to change
 			this.watcherDebounceMs = editMount.watcherDebounceMs;
 			this.watcherUsePolling = editMount.watcherUsePolling ?? false;
 			this.watcherPollingIntervalMs = editMount.watcherPollingIntervalMs;
@@ -167,6 +176,71 @@ export class MountManagerModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.createEl('h2', { text: this.editMount ? 'Edit Mount Point' : 'Add Mount Point' });
+
+		// ── Mount type selector ────────────────────────────────────────────
+		const localSection = contentEl.createDiv();
+		const webdavSection = contentEl.createDiv();
+
+		const toggleSections = (type: MountType) => {
+			this.mountType = type;
+			localSection.style.display = type === 'local' ? '' : 'none';
+			webdavSection.style.display = type === 'webdav' ? '' : 'none';
+		};
+
+		new Setting(contentEl)
+			.setName('Mount type')
+			.setDesc('Choose between a local filesystem folder or a WebDAV server (Nextcloud, ownCloud, generic WebDAV)')
+			.addDropdown(drop => drop
+				.addOption('local', 'Local filesystem')
+				.addOption('webdav', 'WebDAV (Nextcloud, ownCloud, generic)')
+				.setValue(this.mountType)
+				.onChange(val => toggleSections(val as MountType)));
+
+		// ── WebDAV fields (shown when type === 'webdav') ───────────────────
+		new Setting(webdavSection)
+			.setName('WebDAV server URL')
+			.setDesc('Full URL to the WebDAV endpoint, e.g. https://cloud.example.com/remote.php/dav/files/username')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('https://cloud.example.com/remote.php/dav/files/username')
+					.setValue(this.webdavUrl)
+					.onChange(val => { this.webdavUrl = val.trim(); });
+			});
+
+		new Setting(webdavSection)
+			.setName('Remote base path')
+			.setDesc('Path on the WebDAV server to use as the mount root, e.g. / or /Documents. Use / for the server root.')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('/')
+					.setValue(this.mountType === 'webdav' ? (this.realPath || '/') : '/')
+					.onChange(val => { this.realPath = val.trim() || '/'; });
+			});
+
+		new Setting(webdavSection)
+			.setName('Username')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('your-username')
+					.setValue(this.webdavUsername)
+					.onChange(val => { this.webdavUsername = val.trim(); });
+			});
+
+		new Setting(webdavSection)
+			.setName('Password')
+			.setDesc(this.editMount?.mountType === 'webdav'
+				? 'Leave blank to keep the existing password. Enter a new value to replace it.'
+				: 'Stored in session memory only — never written to disk or synced.')
+			.addText(text => {
+				text.inputEl.type = 'password';
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder(this.editMount?.mountType === 'webdav' ? '(unchanged)' : 'password')
+					.setValue('')
+					.onChange(val => { this.webdavPassword = val; });
+			});
+
+		// Apply initial visibility
+		toggleSections(this.mountType);
 
 		const platform = getPlatform();
 		const wsl = isWSL();
@@ -182,7 +256,7 @@ export class MountManagerModal extends Modal {
 		}
 
 		// ── Real path ──────────────────────────────────────────────────────
-		const realPathSetting = new Setting(contentEl)
+		const realPathSetting = new Setting(localSection)
 			.setName('Real path (on disk)')
 			.setDesc('Absolute path to the external folder you want to mount')
 			.addText(text => {
@@ -227,7 +301,7 @@ export class MountManagerModal extends Modal {
 
 		// WSL context hints
 		if (platform === 'windows') {
-			contentEl.createEl('p', {
+			localSection.createEl('p', {
 				text: 'WSL tip: To mount a Linux (WSL 2) folder in Windows Obsidian, use ' +
 					'\\\\wsl.localhost\\<Distro>\\path (Windows 11 / Win 10 21H1+) ' +
 					'or \\\\wsl$\\<Distro>\\path (older Windows 10). ' +
@@ -235,7 +309,7 @@ export class MountManagerModal extends Modal {
 				cls: 'setting-item-description',
 			});
 		} else if (wsl) {
-			contentEl.createEl('p', {
+			localSection.createEl('p', {
 				text: 'WSL tip: Windows drives are accessible at /mnt/c/, /mnt/d/, etc. ' +
 					'To let Windows-side Obsidian see this folder, use ' +
 					'\\\\wsl.localhost\\<Distro>\\path (Windows 11 / Win 10 21H1+) ' +
@@ -433,6 +507,59 @@ export class MountManagerModal extends Modal {
 	// ------------------------------------------------------------------
 
 	private async handleSave(): Promise<void> {
+		const isWebDAV = this.mountType === 'webdav';
+
+		// ── WebDAV-specific validation ─────────────────────────────────────
+		if (isWebDAV) {
+			if (!this.webdavUrl) {
+				new Notice('Folder Bridge: WebDAV server URL is required.');
+				return;
+			}
+			try { new URL(this.webdavUrl); } catch {
+				new Notice('Folder Bridge: WebDAV URL is not valid. Include the scheme, e.g. https://…');
+				return;
+			}
+			if (!this.webdavUsername) {
+				new Notice('Folder Bridge: WebDAV username is required.');
+				return;
+			}
+			// Require a password only on add; on edit the stored one is kept if blank
+			if (!this.editMount && !this.webdavPassword) {
+				new Notice('Folder Bridge: WebDAV password is required.');
+				return;
+			}
+			if (!this.virtualPath.trim()) {
+				new Notice('Folder Bridge: Virtual path is required.');
+				return;
+			}
+
+			const normalizedVirtual = normalizePath(this.virtualPath.trim());
+			const remotePath = this.realPath || '/';
+
+			await this.onSave(
+				{
+					virtualPath: normalizedVirtual,
+					realPath: remotePath,
+					enabled: this.editMount ? this.editMount.enabled : true,
+					readOnly: this.readOnly,
+					label: this.label || undefined,
+					mountType: 'webdav',
+					webdavUrl: this.webdavUrl,
+					webdavUsername: this.webdavUsername,
+					// Pass password transiently so plugin can store it under the real mount id
+					webdavPassword: this.webdavPassword || undefined,
+					watcherDebounceMs: undefined,
+					watcherUsePolling: undefined,
+					watcherPollingIntervalMs: undefined,
+					maxFiles: this.maxFiles,
+				},
+				this.editMount?.id,
+			);
+			this.close();
+			return;
+		}
+
+		// ── Local filesystem validation ────────────────────────────────────
 		// Fall back to the real folder's base name when no virtual path was typed
 		const virtualPathToUse = this.virtualPath.trim()
 			|| (this.realPath ? path.basename(this.realPath) : '');
@@ -522,6 +649,17 @@ export class MountManagerModal extends Modal {
  * Called when the settings tab renders the mount list.
  */
 export async function getMountStatus(mount: MountPoint): Promise<MountStatus> {
+	// WebDAV mount reachability is checked via the HTTP adapter in the plugin,
+	// not via local filesystem access.  Return a placeholder "reachable" status
+	// so the settings panel doesn't show a spurious error.
+	if (mount.mountType === 'webdav') {
+		return {
+			mount,
+			reachable: true,
+			readOnly: mount.readOnly,
+			error: undefined,
+		};
+	}
 	const { accessible, readOnly, error } = await checkPathAccessible(mount.realPath);
 	return {
 		mount,

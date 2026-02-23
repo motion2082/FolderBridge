@@ -29,6 +29,14 @@ export class FileWatcher {
      * Start watching a mount point for changes.
      */
     startWatching(mount: MountPoint): void {
+        // WebDAV mounts are accessed over HTTP — there is no local filesystem path
+        // to watch for native change events.  Polling over HTTP is not supported by
+        // chokidar, so we skip the watcher for WebDAV mounts entirely.
+        if (mount.mountType === 'webdav') {
+            console.debug(`[FolderBridge] Skipping file watcher for WebDAV mount: ${mount.virtualPath}`);
+            return;
+        }
+
         if (this.watchers.has(mount.id)) {
             this.stopWatching(mount);
         }
