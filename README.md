@@ -17,6 +17,15 @@ Extends Obsidian's single-root vault by letting you mount external folders as se
 - **Security Allowlist** — Only explicitly approved real paths can be accessed; system directories are blocked
 - **Dry-Run Mode** — Log all write operations to the console without executing them (safe for testing)
 
+### Platform Support
+
+| Platform | Status | Notes |
+|----------|--------|-------|
+| Windows | ✅ Tested | Full support — long paths, UNC, NTFS quirks all handled |
+| macOS | ⚠️ Untested | POSIX code paths are implemented; not yet officially tested. Community reports welcome. |
+| Linux | ✅ Tested | POSIX paths, works including WSL |
+| iOS / Android | ❌ Not supported | Obsidian's mobile sandbox prevents access to arbitrary filesystem paths |
+
 ---
 
 ## Installation
@@ -119,12 +128,26 @@ You can hide specific files or folders from Obsidian to improve performance and 
 
 ---
 
-## Windows Notes
+## Platform Notes
+
+### Windows
 
 - **Long paths**: Paths over 260 characters are handled automatically with the `\\?\` prefix. For best results, also enable **Long Path Support** in Windows Settings → System → For Developers.
 - **Symlinks**: Creating symlinks on Windows requires either Developer Mode or administrator rights. Folder Bridge itself does not create symlinks, but the underlying filesystem may encounter related permission errors.
 - **UNC network paths** (`\\server\share\...`): Supported, but file-change watching may not work on some servers and the path may be unavailable offline.
 - **Reserved names**: Files and folders named `CON`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` (Windows reserved device names) are blocked from creation via Folder Bridge to prevent cryptic OS errors.
+- **OneDrive Files On Demand**: Online-only placeholder files will show a user-friendly error rather than a raw ENOENT. Right-click the file in Explorer and choose **Always keep on this device** to make it locally accessible.
+
+### macOS
+
+> ⚠️ **macOS has not yet been officially tested.** The POSIX code paths are fully implemented and should work, but there may be edge cases. If you run into issues, please [open an issue](https://github.com/tescolopio/Obsidian_FolderBridge/issues) — macOS bug reports are actively welcomed.
+
+- Standard absolute paths work: `/Users/yourname/Documents/Work`
+- **iCloud Drive (optimized storage)**: Files set to "online only" behave like OneDrive placeholders — Folder Bridge will surface a friendly error. Open Finder, right-click the file, and choose **Download Now** to make it available locally.
+
+### Mobile (iOS / Android)
+
+Folder Bridge is **not supported on mobile**. Obsidian's iOS and Android sandbox prevents plugins from accessing filesystem paths outside the vault container. There is no workaround at the OS level — this is an intentional platform security restriction.
 
 ---
 
