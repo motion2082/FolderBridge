@@ -283,8 +283,12 @@ export default class FolderBridgePlugin extends Plugin {
 
 				return action;
 			},
-			(name: string, mount: MountPoint) => {
-				return this.isNameIgnored(name, mount);
+			// onMountRootMove: called when the user drags/moves a mount root in the file explorer
+			async (mount: MountPoint, newVirtualPath: string) => {
+				await this.updateMount(mount.id, { ...mount, virtualPath: newVirtualPath });
+			},
+			(name: string, mount: MountPoint, mountRelativePath?: string) => {
+				return this.isNameIgnored(name, mount, mountRelativePath);
 			}
 		);
 

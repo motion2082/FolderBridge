@@ -31,6 +31,7 @@ export class VirtualAdapter {
 	private security: SecurityManager;
 	private dryRun: boolean;
 	private onMountRootDelete: (mount: MountPoint) => Promise<'unmount' | 'delete' | 'cancel'>;
+	private onMountRootMove: (mount: MountPoint, newVirtualPath: string) => Promise<void>;
 	private isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean;
 
 	constructor(
@@ -39,6 +40,7 @@ export class VirtualAdapter {
 		security: SecurityManager,
 		dryRun = false,
 		onMountRootDelete: (mount: MountPoint) => Promise<'unmount' | 'delete' | 'cancel'>,
+		onMountRootMove: (mount: MountPoint, newVirtualPath: string) => Promise<void>,
 		isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean
 	) {
 		this.original = original;
@@ -46,6 +48,7 @@ export class VirtualAdapter {
 		this.security = security;
 		this.dryRun = dryRun;
 		this.onMountRootDelete = onMountRootDelete;
+		this.onMountRootMove = onMountRootMove;
 		this.isIgnored = isIgnored;
 	}
 
@@ -613,7 +616,11 @@ export class VirtualAdapter {
 	async rename(normalizedPath: string, newNormalizedPath: string): Promise<void> {
 		const rootMount = this.pathMapper.getMountByVirtualPath(normalizedPath);
 		if (rootMount) {
-			throw new Error(`FolderBridge: Cannot rename a mount root from the file explorer. To change the mount path, please update it in the FolderBridge plugin settings.`);
+			// The user dragged or moved the mount root folder in the file explorer.
+			// Delegate to the plugin's updateMount() via the onMountRootMove callback
+			// so the virtual path is updated live without touching the real disk folder.
+			await this.onMountRootMove(rootMount, newNormalizedPath);
+			return;
 		}
 
 		const srcMount = this.pathMapper.getMountForPath(normalizedPath);
