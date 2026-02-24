@@ -142,6 +142,21 @@ export class MountManagerModal extends Modal {
 	private webdavUrl = '';
 	private webdavUsername = '';
 	private webdavPassword = '';
+	// S3 / Backblaze B2 fields
+	private s3Bucket = '';
+	private s3Region = '';
+	private s3Endpoint = '';
+	private s3AccessKeyId = '';
+	private s3SecretKey = '';
+	private s3ForcePathStyle = false;
+	private s3Prefix = '/';
+	// SFTP fields
+	private sftpHost = '';
+	private sftpPort = 22;
+	private sftpUsername = '';
+	private sftpPassword = '';
+	private sftpPrivateKeyPath = '';
+	private sftpPassphrase = '';
 	// Advanced (per-mount watcher + performance)
 	private watcherDebounceMs: number | undefined = undefined;
 	private watcherUsePolling = false;
@@ -165,9 +180,24 @@ export class MountManagerModal extends Modal {
 			this.realPath = editMount.realPath;
 			this.readOnly = editMount.readOnly;
 			this.label = editMount.label ?? '';
+			// WebDAV
 			this.webdavUrl = editMount.webdavUrl ?? '';
 			this.webdavUsername = editMount.webdavUsername ?? '';
-			// Password is never stored – leave blank; user re-enters to change
+			// Password is never stored — leave blank; user re-enters to change
+			// S3
+			this.s3Bucket = editMount.s3Bucket ?? '';
+			this.s3Region = editMount.s3Region ?? '';
+			this.s3Endpoint = editMount.s3Endpoint ?? '';
+			this.s3AccessKeyId = editMount.s3AccessKeyId ?? '';
+			this.s3ForcePathStyle = editMount.s3ForcePathStyle ?? false;
+			this.s3Prefix = editMount.realPath || '/';
+			// SFTP
+			this.sftpHost = editMount.sftpHost ?? '';
+			this.sftpPort = editMount.sftpPort ?? 22;
+			this.sftpUsername = editMount.sftpUsername ?? '';
+			this.sftpPrivateKeyPath = editMount.sftpPrivateKeyPath ?? '';
+			// Passwords/passphrases never stored — leave blank
+			// Advanced watcher
 			this.watcherDebounceMs = editMount.watcherDebounceMs;
 			this.watcherUsePolling = editMount.watcherUsePolling ?? false;
 			this.watcherPollingIntervalMs = editMount.watcherPollingIntervalMs;
@@ -193,35 +223,49 @@ export class MountManagerModal extends Modal {
 		const localSection = contentEl.createDiv();
 		const vaultSection = contentEl.createDiv();
 		const webdavSection = contentEl.createDiv();
+		const s3Section = contentEl.createDiv();
+		const sftpSection = contentEl.createDiv();
 
 		const toggleSections = (type: MountType) => {
 			this.mountType = type;
 			localSection.style.display = type === 'local' ? '' : 'none';
 			vaultSection.style.display = type === 'vault' ? '' : 'none';
 			webdavSection.style.display = type === 'webdav' ? '' : 'none';
+			s3Section.style.display = type === 's3' ? '' : 'none';
+			sftpSection.style.display = type === 'sftp' ? '' : 'none';
 		};
 
 		if (isMobile) {
-			// On mobile, hide the dropdown and only allow WebDAV
+			// On mobile, only WebDAV and S3 mounts are supported
 			contentEl.createEl('p', {
-				text: '📱 On mobile, only WebDAV mounts are supported. Local filesystem and vault mounts require Obsidian Desktop.',
+				text: 'On mobile, only WebDAV and S3 mounts are supported. Local filesystem, vault, and SFTP mounts require Obsidian Desktop.',
 				cls: 'setting-item-description',
 			});
 			contentEl.createEl('p', {
-				text: '💡 To access files on this device, install a WebDAV server app (e.g. CX File Explorer) and connect to http://localhost:PORT/',
+				text: 'To access local files on this device, install a WebDAV server app (e.g. CX File Explorer) and connect to http://localhost:PORT/',
 				cls: 'setting-item-description',
 			});
-			toggleSections('webdav');
+			new Setting(contentEl)
+				.setName('Mount type')
+				.addDropdown(drop => drop
+					.addOption('webdav', 'WebDAV (Nextcloud, ownCloud, generic)')
+					.addOption('s3', 'Amazon S3 / Backblaze B2')
+					.setValue(this.mountType === 's3' ? 's3' : 'webdav')
+					.onChange(val => toggleSections(val as MountType)));
+			toggleSections(this.mountType === 's3' ? 's3' : 'webdav');
 		} else {
 			new Setting(contentEl)
 				.setName('Mount type')
-				.setDesc('Choose between a local filesystem folder, another Obsidian vault, or a WebDAV server')
+				.setDesc('Choose the storage backend for this mount point')
 				.addDropdown(drop => drop
 					.addOption('local', 'Local filesystem')
 					.addOption('vault', 'Another Obsidian vault')
 					.addOption('webdav', 'WebDAV (Nextcloud, ownCloud, generic)')
+					.addOption('s3', 'Amazon S3 / Backblaze B2')
+					.addOption('sftp', 'SFTP (SSH file transfer)')
 					.setValue(this.mountType)
 					.onChange(val => toggleSections(val as MountType)));
+			toggleSections(this.mountType);
 		} // end else (desktop only)
 
 		// ── Vault section (shown when type === 'vault') ────────────────────
@@ -346,6 +390,227 @@ export class MountManagerModal extends Modal {
 				text.setPlaceholder(hasStored ? '(saved — leave blank to keep)' : this.editMount?.mountType === 'webdav' ? '(unchanged)' : 'password')
 					.setValue('')
 					.onChange(val => { this.webdavPassword = val; });
+			});
+
+		// ── S3 / Backblaze B2 section ──────────────────────────────────────
+		s3Section.createEl('p', {
+			text: 'Mount an Amazon S3 bucket or a Backblaze B2 bucket via the S3-compatible API. ' +
+				'Files appear as regular notes in your vault. Note: S3 has no native folder rename — ' +
+				'renames are implemented as copy + delete, which may be slow for large directories.',
+			cls: 'setting-item-description',
+		});
+
+		const S3_PRESETS: Record<string, { region: string; endpoint: string; forcePathStyle: boolean; note: string }> = {
+			aws:       { region: 'us-east-1', endpoint: '', forcePathStyle: false, note: 'Use an IAM user with S3 read/write permissions. Access Key ID + Secret Access Key.' },
+			b2:        { region: 'us-west-004', endpoint: 'https://s3.us-west-004.backblazeb2.com', forcePathStyle: true, note: 'Use a Backblaze Application Key with read/write access to your bucket. Set endpoint to your bucket region.' },
+			minio:     { region: 'us-east-1', endpoint: 'http://localhost:9000', forcePathStyle: true, note: 'Self-hosted MinIO. Path-style is required. Set endpoint to your MinIO URL.' },
+			cloudflare:{ region: 'auto', endpoint: 'https://<ACCOUNT_ID>.r2.cloudflarestorage.com', forcePathStyle: false, note: 'Cloudflare R2. Replace <ACCOUNT_ID> with your Cloudflare account ID.' },
+		};
+
+		let s3PresetNoteEl: HTMLParagraphElement | null = null;
+		let s3RegionText: import('obsidian').TextComponent | null = null;
+		let s3EndpointText: import('obsidian').TextComponent | null = null;
+		let s3PathStyleToggle: import('obsidian').ToggleComponent | null = null;
+
+		if (!this.editMount) {
+			new Setting(s3Section)
+				.setName('Quick-fill preset')
+				.setDesc('Choose your S3-compatible service to pre-fill fields below.')
+				.addDropdown(drop => {
+					drop.addOption('', '— select a preset —');
+					drop.addOption('aws', 'Amazon S3');
+					drop.addOption('b2', 'Backblaze B2');
+					drop.addOption('minio', 'MinIO (self-hosted)');
+					drop.addOption('cloudflare', 'Cloudflare R2');
+					drop.setValue('');
+					drop.onChange(val => {
+						const preset = S3_PRESETS[val];
+						if (!preset) return;
+						this.s3Region = preset.region;
+						this.s3Endpoint = preset.endpoint;
+						this.s3ForcePathStyle = preset.forcePathStyle;
+						s3RegionText?.setValue(preset.region);
+						s3EndpointText?.setValue(preset.endpoint);
+						s3PathStyleToggle?.setValue(preset.forcePathStyle);
+						if (!s3PresetNoteEl) {
+							s3PresetNoteEl = s3Section.createEl('p', { cls: 'setting-item-description' });
+							s3PresetNoteEl.style.marginTop = '-4px';
+							s3PresetNoteEl.style.marginBottom = '8px';
+							s3PresetNoteEl.style.color = 'var(--text-accent)';
+						}
+						s3PresetNoteEl.setText(preset.note);
+					});
+				});
+		}
+
+		new Setting(s3Section)
+			.setName('Bucket name')
+			.setDesc('The S3 bucket or B2 bucket name (case-sensitive)')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('my-obsidian-bucket')
+					.setValue(this.s3Bucket)
+					.onChange(val => { this.s3Bucket = val.trim(); });
+			});
+
+		new Setting(s3Section)
+			.setName('Region')
+			.setDesc('AWS region (e.g. us-east-1) or B2 region string (e.g. us-west-004)')
+			.addText(text => {
+				s3RegionText = text;
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('us-east-1')
+					.setValue(this.s3Region)
+					.onChange(val => { this.s3Region = val.trim(); });
+			});
+
+		new Setting(s3Section)
+			.setName('Custom endpoint URL (optional)')
+			.setDesc('Leave empty for AWS S3. For Backblaze B2 set to your region endpoint, e.g. https://s3.us-west-004.backblazeb2.com')
+			.addText(text => {
+				s3EndpointText = text;
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('https://s3.us-west-004.backblazeb2.com  (leave blank for AWS)')
+					.setValue(this.s3Endpoint)
+					.onChange(val => { this.s3Endpoint = val.trim(); });
+			});
+
+		new Setting(s3Section)
+			.setName('Key prefix / path')
+			.setDesc('Optional folder prefix inside the bucket to use as the mount root, e.g. / for bucket root or /notes/ for a sub-folder.')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('/')
+					.setValue(this.s3Prefix)
+					.onChange(val => { this.s3Prefix = val.trim() || '/'; });
+			});
+
+		new Setting(s3Section)
+			.setName('Access key ID')
+			.setDesc('IAM Access Key ID (AWS) or Application Key ID (Backblaze B2)')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('AKIAIOSFODNN7EXAMPLE')
+					.setValue(this.s3AccessKeyId)
+					.onChange(val => { this.s3AccessKeyId = val.trim(); });
+			});
+
+		new Setting(s3Section)
+			.setName('Secret access key')
+			.setDesc(this.editMount?.mountType === 's3'
+				? (this.editMount.encryptedS3SecretKey
+					? 'Saved securely on this device. Leave blank to keep, or enter a new value to replace.'
+					: 'Leave blank to keep the existing key. Enter a new value to replace it.')
+				: 'Encrypted and saved on this device — survives Obsidian restarts.')
+			.addText(text => {
+				text.inputEl.type = 'password';
+				text.inputEl.style.flex = '1';
+				const hasStored = !!(this.editMount?.encryptedS3SecretKey);
+				text.setPlaceholder(hasStored ? '(saved — leave blank to keep)' : 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY')
+					.setValue('')
+					.onChange(val => { this.s3SecretKey = val; });
+			});
+
+		new Setting(s3Section)
+			.setName('Force path-style addressing')
+			.setDesc('Required for Backblaze B2, MinIO, and most self-hosted S3 servers. Leave off for Amazon S3 and Cloudflare R2.')
+			.addToggle(toggle => {
+				s3PathStyleToggle = toggle;
+				toggle.setValue(this.s3ForcePathStyle)
+					.onChange(val => { this.s3ForcePathStyle = val; });
+			});
+
+		// ── SFTP section ────────────────────────────────────────────────
+		sftpSection.createEl('p', {
+			text: 'Mount a remote directory over SSH/SFTP. Requires a network connection. ' +
+				'The remote server must have an SFTP subsystem enabled (standard on OpenSSH). ' +
+				'SFTP mounts are desktop-only.',
+			cls: 'setting-item-description',
+		});
+
+		new Setting(sftpSection)
+			.setName('Host')
+			.setDesc('Hostname or IP address of the SFTP server')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('files.example.com')
+					.setValue(this.sftpHost)
+					.onChange(val => { this.sftpHost = val.trim(); });
+			});
+
+		new Setting(sftpSection)
+			.setName('Port')
+			.setDesc('SSH port (default 22)')
+			.addText(text => {
+				text.inputEl.type = 'number';
+				text.inputEl.style.width = '80px';
+				text.setPlaceholder('22')
+					.setValue(String(this.sftpPort))
+					.onChange(val => {
+						const n = parseInt(val, 10);
+						this.sftpPort = isNaN(n) || n <= 0 ? 22 : n;
+					});
+			});
+
+		new Setting(sftpSection)
+			.setName('Username')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('alice')
+					.setValue(this.sftpUsername)
+					.onChange(val => { this.sftpUsername = val.trim(); });
+			});
+
+		new Setting(sftpSection)
+			.setName('Remote base path')
+			.setDesc('Absolute path on the remote server to use as the mount root, e.g. /home/alice/notes')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('/home/alice/notes')
+					.setValue(this.mountType === 'sftp' ? (this.realPath || '/home') : '/home')
+					.onChange(val => { this.realPath = val.trim() || '/'; });
+			});
+
+		new Setting(sftpSection)
+			.setName('Password')
+			.setDesc(this.editMount?.mountType === 'sftp'
+				? (this.editMount.encryptedSftpPassword
+					? 'Saved securely on this device. Leave blank to keep, or enter a new value to replace.'
+					: 'Leave blank to keep the existing password.')
+				: 'Used for password authentication. Leave blank if using a private key below.')
+			.addText(text => {
+				text.inputEl.type = 'password';
+				text.inputEl.style.flex = '1';
+				const hasStored = !!(this.editMount?.encryptedSftpPassword);
+				text.setPlaceholder(hasStored ? '(saved — leave blank to keep)' : 'password (or leave blank for key auth)')
+					.setValue('')
+					.onChange(val => { this.sftpPassword = val; });
+			});
+
+		new Setting(sftpSection)
+			.setName('Private key file path (optional)')
+			.setDesc('Absolute path to your SSH private key file on this device, e.g. /home/alice/.ssh/id_ed25519. Leave blank for password auth.')
+			.addText(text => {
+				text.inputEl.style.flex = '1';
+				text.setPlaceholder('/home/yourname/.ssh/id_ed25519')
+					.setValue(this.sftpPrivateKeyPath)
+					.onChange(val => { this.sftpPrivateKeyPath = val.trim(); });
+			});
+
+		new Setting(sftpSection)
+			.setName('Private key passphrase (optional)')
+			.setDesc(this.editMount?.mountType === 'sftp'
+				? (this.editMount.encryptedSftpPassphrase
+					? 'Saved securely on this device. Leave blank to keep.'
+					: 'Leave blank to keep the existing passphrase.')
+				: 'Only needed if your private key is passphrase-protected.')
+			.addText(text => {
+				text.inputEl.type = 'password';
+				text.inputEl.style.flex = '1';
+				const hasStored = !!(this.editMount?.encryptedSftpPassphrase);
+				text.setPlaceholder(hasStored ? '(saved — leave blank to keep)' : 'passphrase (if key is encrypted)')
+					.setValue('')
+					.onChange(val => { this.sftpPassphrase = val; });
 			});
 
 		// Apply initial visibility
@@ -616,6 +881,103 @@ export class MountManagerModal extends Modal {
 
 	private async handleSave(): Promise<void> {
 		const isWebDAV = this.mountType === 'webdav';
+		const isS3 = this.mountType === 's3';
+		const isSFTP = this.mountType === 'sftp';
+
+		// ── S3-specific validation ──────────────────────────────────────────
+		if (isS3) {
+			if (!this.s3Bucket) {
+				new Notice('Folder Bridge: S3 bucket name is required.');
+				return;
+			}
+			if (!this.s3Region) {
+				new Notice('Folder Bridge: S3 region is required.');
+				return;
+			}
+			if (!this.s3AccessKeyId) {
+				new Notice('Folder Bridge: S3 access key ID is required.');
+				return;
+			}
+			const hasStoredSecret = !!(this.editMount?.encryptedS3SecretKey);
+			if (!this.editMount && !this.s3SecretKey && !hasStoredSecret) {
+				new Notice('Folder Bridge: S3 secret access key is required.');
+				return;
+			}
+			if (!this.virtualPath.trim()) {
+				new Notice('Folder Bridge: Virtual path is required.');
+				return;
+			}
+
+			const normalizedVirtual = normalizePath(this.virtualPath.trim());
+			const prefix = this.s3Prefix || '/';
+
+			await this.onSave(
+				{
+					virtualPath: normalizedVirtual,
+					realPath: prefix,
+					enabled: this.editMount ? this.editMount.enabled : true,
+					readOnly: this.readOnly,
+					label: this.label || undefined,
+					mountType: 's3',
+					s3Bucket: this.s3Bucket,
+					s3Region: this.s3Region,
+					s3Endpoint: this.s3Endpoint || undefined,
+					s3AccessKeyId: this.s3AccessKeyId,
+					s3ForcePathStyle: this.s3ForcePathStyle || undefined,
+					s3SecretKey: this.s3SecretKey || undefined,
+					maxFiles: this.maxFiles,
+				},
+				this.editMount?.id,
+			);
+			this.close();
+			return;
+		}
+
+		// ── SFTP-specific validation ────────────────────────────────────────
+		if (isSFTP) {
+			if (!this.sftpHost) {
+				new Notice('Folder Bridge: SFTP host is required.');
+				return;
+			}
+			if (!this.sftpUsername) {
+				new Notice('Folder Bridge: SFTP username is required.');
+				return;
+			}
+			const hasStoredPassword = !!(this.editMount?.encryptedSftpPassword);
+			const hasKeyPath = !!this.sftpPrivateKeyPath;
+			if (!this.editMount && !this.sftpPassword && !hasStoredPassword && !hasKeyPath) {
+				new Notice('Folder Bridge: SFTP password or private key path is required.');
+				return;
+			}
+			if (!this.virtualPath.trim()) {
+				new Notice('Folder Bridge: Virtual path is required.');
+				return;
+			}
+
+			const normalizedVirtual = normalizePath(this.virtualPath.trim());
+			const remotePath = this.realPath || '/';
+
+			await this.onSave(
+				{
+					virtualPath: normalizedVirtual,
+					realPath: remotePath,
+					enabled: this.editMount ? this.editMount.enabled : true,
+					readOnly: this.readOnly,
+					label: this.label || undefined,
+					mountType: 'sftp',
+					sftpHost: this.sftpHost,
+					sftpPort: this.sftpPort !== 22 ? this.sftpPort : undefined,
+					sftpUsername: this.sftpUsername,
+					sftpPassword: this.sftpPassword || undefined,
+					sftpPrivateKeyPath: this.sftpPrivateKeyPath || undefined,
+					sftpPassphrase: this.sftpPassphrase || undefined,
+					maxFiles: this.maxFiles,
+				},
+				this.editMount?.id,
+			);
+			this.close();
+			return;
+		}
 
 		// ── WebDAV-specific validation ─────────────────────────────────────
 		if (isWebDAV) {
@@ -760,10 +1122,10 @@ export class MountManagerModal extends Modal {
  * Called when the settings tab renders the mount list.
  */
 export async function getMountStatus(mount: MountPoint): Promise<MountStatus> {
-	// WebDAV mount reachability is checked via the HTTP adapter in the plugin,
-	// not via local filesystem access.  Return a placeholder "reachable" status
-	// so the settings panel doesn't show a spurious error.
-	if (mount.mountType === 'webdav') {
+	// Remote mounts (WebDAV, S3, SFTP) have no local filesystem path to check.
+	// Their reachability is probed by the plugin's health-check loop separately.
+	// Return a placeholder "reachable" status so the settings panel stays clean.
+	if (mount.mountType === 'webdav' || mount.mountType === 's3' || mount.mountType === 'sftp') {
 		return {
 			mount,
 			reachable: true,

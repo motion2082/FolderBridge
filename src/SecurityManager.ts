@@ -1,6 +1,9 @@
 import * as path from 'path';
-import { MountPoint } from './types';
+import { MountPoint, MountType } from './types';
 import { normalizeForComparison, isUNCPath } from './OSHelpers';
+
+/** Mount types whose realPath is a remote address, not a local filesystem path. */
+const CLOUD_MOUNT_TYPES: Set<MountType> = new Set(['webdav', 's3', 'sftp']);
 
 /**
  * SecurityManager enforces an explicit allowlist of real filesystem paths.
@@ -52,31 +55,37 @@ export class SecurityManager {
 		if (!mount.virtualPath || !mount.virtualPath.trim()) {
 			return 'Virtual path cannot be empty.';
 		}
-		if (!mount.realPath || !mount.realPath.trim()) {
-			return 'Real path cannot be empty.';
-		}
-		if (!path.isAbsolute(mount.realPath)) {
-			return 'Real path must be an absolute filesystem path.';
-		}
 
-		// Block obviously dangerous root-level paths and their subdirectories
-		const dangerous = [
-			'/', '/etc', '/usr', '/bin', '/sbin', '/boot', '/dev', '/proc', '/sys', '/var',
-			'C:\\', 'C:/',
-			'C:\\Windows', 'C:/Windows',
-			'C:\\Program Files', 'C:/Program Files',
-			'C:\\Program Files (x86)', 'C:/Program Files (x86)'
-		];
-		const norm = normalizeForComparison(mount.realPath);
-		for (const d of dangerous) {
-			const dangerousNorm = normalizeForComparison(d);
-			if (
-				norm === dangerousNorm ||
-				norm.startsWith(dangerousNorm + path.sep) ||
-				// Case-insensitive comparison may produce lowercased or normalized separators; check both
-				norm.startsWith(dangerousNorm + '/')
-			) {
-				return `"${mount.realPath}" is a protected system path and cannot be mounted.`;
+		// Cloud mounts (WebDAV, S3, SFTP) don't have local real paths — skip local-path checks.
+		const isCloud = mount.mountType != null && CLOUD_MOUNT_TYPES.has(mount.mountType);
+
+		if (!isCloud) {
+			if (!mount.realPath || !mount.realPath.trim()) {
+				return 'Real path cannot be empty.';
+			}
+			if (!path.isAbsolute(mount.realPath)) {
+				return 'Real path must be an absolute filesystem path.';
+			}
+
+			// Block obviously dangerous root-level paths and their subdirectories
+			const dangerous = [
+				'/', '/etc', '/usr', '/bin', '/sbin', '/boot', '/dev', '/proc', '/sys', '/var',
+				'C:\\', 'C:/',
+				'C:\\Windows', 'C:/Windows',
+				'C:\\Program Files', 'C:/Program Files',
+				'C:\\Program Files (x86)', 'C:/Program Files (x86)'
+			];
+			const norm = normalizeForComparison(mount.realPath);
+			for (const d of dangerous) {
+				const dangerousNorm = normalizeForComparison(d);
+				if (
+					norm === dangerousNorm ||
+					norm.startsWith(dangerousNorm + path.sep) ||
+					// Case-insensitive comparison may produce lowercased or normalized separators; check both
+					norm.startsWith(dangerousNorm + '/')
+				) {
+					return `"${mount.realPath}" is a protected system path and cannot be mounted.`;
+				}
 			}
 		}
 
@@ -127,8 +136,11 @@ export class SecurityManager {
 	 * Pass `existingMounts` to also receive overlap advisories when the
 	 * candidate real path is a parent or child of an already-mounted path.
 	 */
-	getPathWarnings(realPath: string, existingMounts: MountPoint[] = []): string[] {
+	getPathWarnings(realPath: string, existingMounts: MountPoint[] = [], mountType?: MountType): string[] {
 		const warnings: string[] = [];
+
+		// Cloud mounts use remote addresses, not local paths — skip all local-path warnings.
+		if (mountType != null && CLOUD_MOUNT_TYPES.has(mountType)) return warnings;
 
 		if (isUNCPath(realPath)) {
 			warnings.push(

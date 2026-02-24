@@ -1,6 +1,6 @@
 {
 	"name": "folderbridge",
-	"version": "1.0.0",
+	"version": "2.0.0",
 	"description": "Adds external folders to your vault as seamless, native-feeling directories. Creates virtual mount points that map real filesystem paths into the vault.",
 	"main": "main.js",
 	"scripts": {
@@ -19,6 +19,7 @@
 	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^20.11.16",
+		"@types/ssh2": "^1.15.4",
 		"@typescript-eslint/eslint-plugin": "^8.56.0",
 		"@typescript-eslint/parser": "^8.56.0",
 		"builtin-modules": "^3.3.0",
@@ -31,7 +32,9 @@
 		"vitest": "^4.0.18"
 	},
 	"dependencies": {
+		"@aws-sdk/client-s3": "^3.750.0",
 		"chokidar": "^5.0.0",
+		"ssh2-sftp-client": "^11.0.0",
 		"webdav": "^5.9.0"
 	}
 }

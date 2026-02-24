@@ -44,11 +44,10 @@ export class FileWatcher {
             return;
         }
 
-        // WebDAV mounts are accessed over HTTP — there is no local filesystem path
-        // to watch for native change events.  Polling over HTTP is not supported by
-        // chokidar, so we skip the watcher for WebDAV mounts entirely.
-        if (mount.mountType === 'webdav') {
-            console.debug(`[FolderBridge] Skipping file watcher for WebDAV mount: ${mount.virtualPath}`);
+        // Cloud mounts (WebDAV, S3, SFTP) are accessed over the network — there
+        // is no local filesystem path to watch for native change events.
+        if (mount.mountType === 'webdav' || mount.mountType === 's3' || mount.mountType === 'sftp') {
+            console.debug(`[FolderBridge] Skipping file watcher for ${mount.mountType ?? 'remote'} mount: ${mount.virtualPath}`);
             return;
         }
 

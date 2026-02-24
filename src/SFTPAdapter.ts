@@ -1,0 +1,358 @@
+import { normalizePath } from 'obsidian';
+import { MountPoint } from './types';
+import { loadSessionCredential, decryptCredential } from './CredentialStore';
+
+/**
+ * SFTPAdapter wraps the `ssh2-sftp-client` library to provide the same
+ * surface area that VirtualAdapter uses for local/WebDAV/S3 operations,
+ * enabling transparent delegation for SFTP mounts.
+ *
+ * Key design decisions:
+ *  - Maintains a persistent, lazily-initialised SFTP connection per adapter.
+ *  - Auto-reconnects when the connection has been dropped (server timeout,
+ *    network interruption, etc.).
+ *  - `mount.realPath` is the remote base directory, e.g. "/home/user/notes".
+ *    All paths are resolved relative to that base.
+ *  - `copy()` is implemented as read-then-write (SFTP has no server-side copy
+ *    primitive for arbitrary paths).
+ *
+ * Authentication supports two modes, checked in order:
+ *  1. Private key file  — path in `mount.sftpPrivateKeyPath`; passphrase
+ *     resolved from the transient field, sessionStorage, or the stored
+ *     encrypted blob.
+ *  2. Password          — resolved from the transient field, sessionStorage,
+ *     or the stored encrypted blob.
+ *
+ * SFTP requires Node.js and is therefore desktop-only.  VirtualAdapter skips
+ * SFTP operations on mobile the same way it skips local-fs operations.
+ */
+
+// ---------------------------------------------------------------------------
+// Lazy loader — prevents pulling in Node.js net/crypto at bundle load time
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function loadSFTPClient(): any {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (require as any)('ssh2-sftp-client');
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface SFTPStatResult {
+    type: 'file' | 'folder';
+    ctime: number;
+    mtime: number;
+    size: number;
+}
+
+// ---------------------------------------------------------------------------
+// SFTPAdapter
+// ---------------------------------------------------------------------------
+
+export class SFTPAdapter {
+    private host: string;
+    private port: number;
+    private username: string;
+    private password?: string;
+    private privateKeyPath?: string;
+    private passphrase?: string;
+
+    // The sftp client instance; recreated on connect
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private sftp: any = null;
+    private connecting = false;
+
+    constructor(
+        host: string,
+        port: number,
+        username: string,
+        options: {
+            password?: string;
+            privateKeyPath?: string;
+            passphrase?: string;
+        }
+    ) {
+        this.host = host;
+        this.port = port;
+        this.username = username;
+        this.password = options.password;
+        this.privateKeyPath = options.privateKeyPath;
+        this.passphrase = options.passphrase;
+    }
+
+    // ------------------------------------------------------------------
+    // Factory
+    // ------------------------------------------------------------------
+
+    /**
+     * Build an SFTPAdapter from a MountPoint, resolving credentials from
+     * transient fields, sessionStorage, or encrypted blobs (in that order).
+     * Returns null if required fields are missing.
+     */
+    static fromMount(mount: MountPoint): SFTPAdapter | null {
+        if (!mount.sftpHost || !mount.sftpUsername) return null;
+
+        const password =
+            mount.sftpPassword ??
+            (mount.id ? loadSessionCredential('sftp-pw', mount.id) : null) ??
+            (mount.encryptedSftpPassword ? decryptCredential(mount.encryptedSftpPassword) : null) ??
+            undefined;
+
+        const passphrase =
+            mount.sftpPassphrase ??
+            (mount.id ? loadSessionCredential('sftp-pp', mount.id) : null) ??
+            (mount.encryptedSftpPassphrase ? decryptCredential(mount.encryptedSftpPassphrase) : null) ??
+            undefined;
+
+        return new SFTPAdapter(
+            mount.sftpHost,
+            mount.sftpPort ?? 22,
+            mount.sftpUsername,
+            {
+                password,
+                privateKeyPath: mount.sftpPrivateKeyPath ?? undefined,
+                passphrase,
+            }
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Connection lifecycle
+    // ------------------------------------------------------------------
+
+    private async connect(): Promise<void> {
+        if (this.sftp && this.isSFTPReady()) return;
+        if (this.connecting) {
+            // Wait until the pending connect resolves
+            await new Promise<void>((resolve) => setTimeout(resolve, 200));
+            return;
+        }
+        this.connecting = true;
+        try {
+            const SFTPClient = loadSFTPClient();
+            const client = new SFTPClient();
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const connectOptions: any = {
+                host: this.host,
+                port: this.port,
+                username: this.username,
+            };
+
+            if (this.privateKeyPath) {
+                const fs = (require as any)('fs'); // eslint-disable-line @typescript-eslint/no-explicit-any
+                connectOptions.privateKey = fs.readFileSync(this.privateKeyPath);
+                if (this.passphrase) connectOptions.passphrase = this.passphrase;
+            } else if (this.password) {
+                connectOptions.password = this.password;
+            }
+
+            await client.connect(connectOptions);
+            this.sftp = client;
+        } finally {
+            this.connecting = false;
+        }
+    }
+
+    private isSFTPReady(): boolean {
+        try {
+            return this.sftp?.sftp != null || typeof this.sftp?.list === 'function';
+        } catch {
+            return false;
+        }
+    }
+
+    /** Close the SFTP connection. Called on unmount. */
+    async disconnect(): Promise<void> {
+        if (this.sftp) {
+            try {
+                await this.sftp.end();
+            } catch { /* ignore */ }
+            this.sftp = null;
+        }
+    }
+
+    /** Test connectivity. Returns null on success, error message on failure. */
+    async testConnection(): Promise<string | null> {
+        try {
+            await this.connect();
+            return null;
+        } catch (e) {
+            return String((e as Error).message ?? e);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Path helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * Resolve a server-relative path (handed off by PathMapper) to a full
+     * remote absolute path by prepending nothing — PathMapper already emits
+     * the full remote path because mount.realPath is the base dir and
+     * toRealPath concatenates normally.
+     *
+     * On SFTP mounts, mount.realPath is stored as an absolute remote path
+     * (e.g. "/home/alice/notes").  PathMapper will produce paths like
+     * "/home/alice/notes/subdir/file.md".  We use them directly.
+     */
+    private toRemotePath(serverRelativePath: string): string {
+        return serverRelativePath.replace(/\\/g, '/');
+    }
+
+    // ------------------------------------------------------------------
+    // exists
+    // ------------------------------------------------------------------
+
+    async exists(serverPath: string): Promise<boolean> {
+        await this.connect();
+        try {
+            const stat = await this.sftp.stat(this.toRemotePath(serverPath));
+            return !!stat;
+        } catch {
+            return false;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // stat
+    // ------------------------------------------------------------------
+
+    async stat(serverPath: string): Promise<SFTPStatResult | null> {
+        await this.connect();
+        try {
+            const info = await this.sftp.stat(this.toRemotePath(serverPath));
+            return {
+                type: info.isDirectory ? (info.isDirectory() ? 'folder' : 'file') : (info.mode & 0o040000 ? 'folder' : 'file'),
+                ctime: info.atime ? info.atime * 1000 : 0,
+                mtime: info.mtime ? info.mtime * 1000 : 0,
+                size: info.size ?? 0,
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // list
+    // ------------------------------------------------------------------
+
+    async list(
+        serverPath: string,
+        virtualParentPath: string,
+        _mount: MountPoint
+    ): Promise<{ files: string[]; folders: string[] }> {
+        const files: string[] = [];
+        const folders: string[] = [];
+        await this.connect();
+        try {
+            const entries = await this.sftp.list(this.toRemotePath(serverPath));
+            for (const entry of entries) {
+                const name: string = entry.name;
+                if (name === '.' || name === '..') continue;
+                const virtualChild = virtualParentPath
+                    ? normalizePath(virtualParentPath + '/' + name)
+                    : name;
+                // ssh2-sftp-client exposes entry.type: 'd' for directory, '-' for file
+                if (entry.type === 'd') {
+                    folders.push(virtualChild);
+                } else {
+                    files.push(virtualChild);
+                }
+            }
+        } catch (e) {
+            console.error(`[Folder Bridge] SFTP list failed for "${serverPath}":`, e);
+        }
+        return { files, folders };
+    }
+
+    // ------------------------------------------------------------------
+    // read
+    // ------------------------------------------------------------------
+
+    async readText(serverPath: string): Promise<string> {
+        await this.connect();
+        const buf: Buffer = await this.sftp.get(this.toRemotePath(serverPath));
+        return buf.toString('utf-8');
+    }
+
+    async readBinary(serverPath: string): Promise<ArrayBuffer> {
+        await this.connect();
+        const buf: Buffer = await this.sftp.get(this.toRemotePath(serverPath));
+        return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+    }
+
+    // ------------------------------------------------------------------
+    // write
+    // ------------------------------------------------------------------
+
+    async writeText(serverPath: string, data: string): Promise<void> {
+        await this.connect();
+        await this.sftp.put(Buffer.from(data, 'utf-8'), this.toRemotePath(serverPath));
+    }
+
+    async writeBinary(serverPath: string, data: ArrayBuffer): Promise<void> {
+        await this.connect();
+        await this.sftp.put(Buffer.from(data), this.toRemotePath(serverPath));
+    }
+
+    async append(serverPath: string, data: string): Promise<void> {
+        let existing = '';
+        try {
+            existing = await this.readText(serverPath);
+        } catch { /* file may not exist yet */ }
+        await this.writeText(serverPath, existing + data);
+    }
+
+    // ------------------------------------------------------------------
+    // mkdir
+    // ------------------------------------------------------------------
+
+    async mkdir(serverPath: string): Promise<void> {
+        await this.connect();
+        await this.sftp.mkdir(this.toRemotePath(serverPath), true); // recursive
+    }
+
+    // ------------------------------------------------------------------
+    // remove
+    // ------------------------------------------------------------------
+
+    async remove(serverPath: string): Promise<void> {
+        await this.connect();
+        const remotePath = this.toRemotePath(serverPath);
+        // Try file delete first; fall back to rmdir for directories
+        try {
+            await this.sftp.delete(remotePath);
+        } catch {
+            try {
+                await this.sftp.rmdir(remotePath, true); // recursive
+            } catch (e) {
+                throw e;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // rename / copy
+    // ------------------------------------------------------------------
+
+    async rename(srcServerPath: string, dstServerPath: string): Promise<void> {
+        await this.connect();
+        await this.sftp.rename(
+            this.toRemotePath(srcServerPath),
+            this.toRemotePath(dstServerPath)
+        );
+    }
+
+    /**
+     * SFTP has no server-side copy primitive; implement as read + write.
+     * Only used for files (not recursive directory copy).
+     */
+    async copy(srcServerPath: string, dstServerPath: string): Promise<void> {
+        const data = await this.readBinary(srcServerPath);
+        await this.writeBinary(dstServerPath, data);
+    }
+}

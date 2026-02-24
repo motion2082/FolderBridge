@@ -7,9 +7,15 @@ import { MountManagerModal, getMountStatus, browseFolderOnDisk, VaultFolderPicke
 import { MountRootDeleteModal } from './src/ui/MountRootDeleteModal';
 import { WelcomeModal } from './src/ui/WelcomeModal';
 import { getPlatform, realPathToResourceUrl, tryReadAsDataUri } from './src/OSHelpers';
-import { encryptPassword, decryptPassword } from './src/CredentialStore';
+import {
+	encryptCredential, decryptCredential,
+	saveSessionCredential, clearSessionCredential,
+	saveWebDAVPassword, clearWebDAVPassword,
+} from './src/CredentialStore';
 import { FileWatcher } from './src/FileWatcher';
 import { WebDAVAdapter } from './src/WebDAVAdapter';
+import { S3Adapter } from './src/S3Adapter';
+import { SFTPAdapter } from './src/SFTPAdapter';
 
 // Lazy-loaded Node.js builtins — safe on Obsidian Mobile (Capacitor).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,11 +251,33 @@ export default class FolderBridgePlugin extends Plugin {
 				// Try to decrypt the persisted encrypted password into sessionStorage
 				// so fromMount() can pick it up without a user prompt.
 				if (mount.encryptedWebdavPassword) {
-					const plain = decryptPassword(mount.encryptedWebdavPassword);
-					if (plain) WebDAVAdapter.savePassword(mount.id, plain);
+					const plain = decryptCredential(mount.encryptedWebdavPassword);
+					if (plain) saveWebDAVPassword(mount.id, plain);
 				}
 				const adapter = WebDAVAdapter.fromMount(mount);
 				if (adapter) this.virtualAdapter?.setWebDAVAdapter(mount.id, adapter);
+
+				// S3 mounts: decrypt secret key so S3Adapter.fromMount() can build the client.
+				if (mount.mountType === 's3' && mount.encryptedS3SecretKey) {
+					const plain = decryptCredential(mount.encryptedS3SecretKey);
+					if (plain) saveSessionCredential('s3', mount.id, plain);
+				}
+				const s3 = S3Adapter.fromMount(mount);
+				if (s3) this.virtualAdapter?.setS3Adapter(mount.id, s3);
+
+				// SFTP mounts: decrypt credentials into sessionStorage.
+				if (mount.mountType === 'sftp') {
+					if (mount.encryptedSftpPassword) {
+						const plain = decryptCredential(mount.encryptedSftpPassword);
+						if (plain) saveSessionCredential('sftp-pw', mount.id, plain);
+					}
+					if (mount.encryptedSftpPassphrase) {
+						const plain = decryptCredential(mount.encryptedSftpPassphrase);
+						if (plain) saveSessionCredential('sftp-pp', mount.id, plain);
+					}
+					const sftpAdapter = SFTPAdapter.fromMount(mount);
+					if (sftpAdapter) this.virtualAdapter?.setSFTPAdapter(mount.id, sftpAdapter);
+				}
 			}
 
 			for (const mount of activeMounts) {
@@ -493,51 +521,54 @@ export default class FolderBridgePlugin extends Plugin {
 	// ------------------------------------------------------------------
 
 	async addMount(mountData: Omit<MountPoint, 'id'>): Promise<void> {
-		const isWebDAV = (mountData as MountPoint).mountType === 'webdav';
+		const mountType = (mountData as MountPoint).mountType;
+		const isCloud = mountType === 'webdav' || mountType === 's3' || mountType === 'sftp';
 
-		// Validate against existing mounts before inserting (local mounts only —
-		// WebDAV realPath is a server-relative path, not an absolute local path)
-		if (!isWebDAV) {
-			const error = this.security.validateMount(mountData, this.settings.mountPoints);
-			if (error) {
-				new Notice(`Folder Bridge: ${error}`);
-				return;
-			}
-			// Surface advisory warnings (UNC paths, real-path overlaps)
-			const warnings = this.security.getPathWarnings(mountData.realPath, this.settings.mountPoints);
+		// Validate against existing mounts; cloud mounts skip local-path validation
+		const error = this.security.validateMount(mountData, this.settings.mountPoints);
+		if (error) {
+			new Notice(`Folder Bridge: ${error}`);
+			return;
+		}
+		if (!isCloud) {
+			// Surface advisory warnings (UNC paths, real-path overlaps) for local mounts
+			const warnings = this.security.getPathWarnings(mountData.realPath, this.settings.mountPoints, mountType);
 			for (const w of warnings) {
 				new Notice(`Folder Bridge warning: ${w}`, 10_000);
 			}
 		}
 
-		// Extract + strip transient password before persisting
-		const { webdavPassword, ...mountDataClean } = mountData as MountPoint;
+		// Strip ALL transient credential fields before persisting to data.json
+		const {
+			webdavPassword,
+			s3SecretKey,
+			sftpPassword,
+			sftpPassphrase,
+			...mountDataClean
+		} = mountData as MountPoint;
 
 		const mount: MountPoint = {
 			...mountDataClean,
 			id: generateId(),
 			deviceId: this.settings.deviceId,
-			// Vault mounts get a broader default ignore list to avoid exposing
-			// the other vault's internal Obsidian config and trash to this vault.
+			// Vault mounts get a broader default ignore list
 			ignoreList: mountDataClean.mountType === 'vault'
 				? ['.git', 'node_modules', '.obsidian', '.trash', '.smart-connections']
 				: ['.git', 'node_modules', '.obsidian']
 		};
 		this.settings.mountPoints.push(mount);
 
-		// Register in allowlist if not already present (local mounts only)
-		if (mount.mountType !== 'webdav' && !this.settings.allowlist.includes(mount.realPath)) {
+		// Register in allowlist (local mounts only — cloud mounts have no local path)
+		if (!isCloud && !this.settings.allowlist.includes(mount.realPath)) {
 			this.settings.allowlist.push(mount.realPath);
 			this.security.allow(mount.realPath);
 		}
 
-		// Wire up WebDAV adapter (password saved to sessionStorage, never data.json)
+		// Wire up WebDAV adapter
 		if (mount.mountType === 'webdav') {
 			if (webdavPassword) {
-				WebDAVAdapter.savePassword(mount.id, webdavPassword);
-				// Also persist an encrypted copy in the mount settings so it
-				// survives Obsidian restarts (device-specific; safe to store).
-				const encrypted = encryptPassword(webdavPassword);
+				saveWebDAVPassword(mount.id, webdavPassword);
+				const encrypted = encryptCredential(webdavPassword);
 				if (encrypted) {
 					mount.encryptedWebdavPassword = encrypted;
 					await this.saveSettings();
@@ -547,14 +578,57 @@ export default class FolderBridgePlugin extends Plugin {
 			if (adapter) this.virtualAdapter?.setWebDAVAdapter(mount.id, adapter);
 		}
 
+		// Wire up S3 adapter
+		if (mount.mountType === 's3') {
+			if (s3SecretKey) {
+				saveSessionCredential('s3', mount.id, s3SecretKey);
+				const encrypted = encryptCredential(s3SecretKey);
+				if (encrypted) {
+					mount.encryptedS3SecretKey = encrypted;
+					await this.saveSettings();
+				}
+			}
+			const s3 = S3Adapter.fromMount(mount);
+			if (s3) this.virtualAdapter?.setS3Adapter(mount.id, s3);
+		}
+
+		// Wire up SFTP adapter
+		if (mount.mountType === 'sftp') {
+			if (sftpPassword) {
+				saveSessionCredential('sftp-pw', mount.id, sftpPassword);
+				const encrypted = encryptCredential(sftpPassword);
+				if (encrypted) {
+					mount.encryptedSftpPassword = encrypted;
+					await this.saveSettings();
+				}
+			}
+			if (sftpPassphrase) {
+				saveSessionCredential('sftp-pp', mount.id, sftpPassphrase);
+				const encrypted = encryptCredential(sftpPassphrase);
+				if (encrypted) {
+					mount.encryptedSftpPassphrase = encrypted;
+					await this.saveSettings();
+				}
+			}
+			const sftpAdapter = SFTPAdapter.fromMount(mount);
+			if (sftpAdapter) this.virtualAdapter?.setSFTPAdapter(mount.id, sftpAdapter);
+		}
+
 		await this.saveSettings();
 		this.pathMapper.update(this.settings.mountPoints, this.settings.deviceId);
 		this.updateStatusBar();
 		await this.notifyVaultMountAdded(mount);
 
-		const mountLabel = mount.mountType === 'webdav'
-			? `"${mount.webdavUrl}" → "${mount.virtualPath}"`
-			: `"${mount.realPath}" → "${mount.virtualPath}"`;
+		let mountLabel: string;
+		if (mount.mountType === 'webdav') {
+			mountLabel = `"${mount.webdavUrl}" → "${mount.virtualPath}"`;
+		} else if (mount.mountType === 's3') {
+			mountLabel = `s3://${mount.s3Bucket}${mount.realPath} → "${mount.virtualPath}"`;
+		} else if (mount.mountType === 'sftp') {
+			mountLabel = `sftp://${mount.sftpHost}${mount.realPath} → "${mount.virtualPath}"`;
+		} else {
+			mountLabel = `"${mount.realPath}" → "${mount.virtualPath}"`;
+		}
 		new Notice(`Folder Bridge: Mounted ${mountLabel}`);
 	}
 
@@ -576,15 +650,32 @@ export default class FolderBridgePlugin extends Plugin {
 			this.security.revoke(mount.realPath);
 		}
 
-		// Tear down WebDAV adapter and clear stored password
+		// Tear down adapters and clear stored credentials
 		if (mount.mountType === 'webdav') {
 			this.virtualAdapter?.clearWebDAVAdapter(mount.id);
-			WebDAVAdapter.clearPassword(mount.id);
-			// Remove the persisted encrypted credential from settings
+			clearWebDAVPassword(mount.id);
 			if (mount.encryptedWebdavPassword) {
 				delete mount.encryptedWebdavPassword;
 				await this.saveSettings();
 			}
+		} else if (mount.mountType === 's3') {
+			this.virtualAdapter?.clearS3Adapter(mount.id);
+			clearSessionCredential('s3', mount.id);
+			if (mount.encryptedS3SecretKey) {
+				delete mount.encryptedS3SecretKey;
+				await this.saveSettings();
+			}
+		} else if (mount.mountType === 'sftp') {
+			this.virtualAdapter?.clearSFTPAdapter(mount.id);
+			clearSessionCredential('sftp-pw', mount.id);
+			clearSessionCredential('sftp-pp', mount.id);
+			if (mount.encryptedSftpPassword) {
+				delete mount.encryptedSftpPassword;
+			}
+			if (mount.encryptedSftpPassphrase) {
+				delete mount.encryptedSftpPassphrase;
+			}
+			await this.saveSettings();
 		}
 
 		await this.saveSettings();
@@ -621,14 +712,19 @@ export default class FolderBridgePlugin extends Plugin {
 			await this.notifyVaultMountRemoved(oldMount);
 		}
 
-		// Keep allowlist in sync when real path changes
+		// Keep allowlist in sync when real path changes (local mounts only)
+		const newMountType = (newData as MountPoint).mountType;
+		const newIsCloud = newMountType === 'webdav' || newMountType === 's3' || newMountType === 'sftp';
+		const oldIsCloud = oldMount.mountType === 'webdav' || oldMount.mountType === 's3' || oldMount.mountType === 'sftp';
 		if (realPathChanged) {
-			const stillUsed = otherMounts.some(m => m.realPath === oldMount.realPath);
-			if (!stillUsed) {
-				this.settings.allowlist = this.settings.allowlist.filter(p => p !== oldMount.realPath);
-				this.security.revoke(oldMount.realPath);
+			if (!oldIsCloud) {
+				const stillUsed = otherMounts.some(m => m.realPath === oldMount.realPath);
+				if (!stillUsed) {
+					this.settings.allowlist = this.settings.allowlist.filter(p => p !== oldMount.realPath);
+					this.security.revoke(oldMount.realPath);
+				}
 			}
-			if (!this.settings.allowlist.includes(newData.realPath)) {
+			if (!newIsCloud && !this.settings.allowlist.includes(newData.realPath)) {
 				this.settings.allowlist.push(newData.realPath);
 				this.security.allow(newData.realPath);
 			}
@@ -658,13 +754,12 @@ export default class FolderBridgePlugin extends Plugin {
 			this.fileWatcher?.startWatching(updatedMount);
 		}
 
-		// Recreate WebDAV adapter if any WebDAV fields changed
+		// Recreate adapters when mount type or credentials change
 		if (updatedMount.mountType === 'webdav') {
 			const { webdavPassword } = newData as MountPoint;
 			if (webdavPassword) {
-				WebDAVAdapter.savePassword(id, webdavPassword);
-				// Persist updated encrypted copy
-				const encrypted = encryptPassword(webdavPassword);
+				saveWebDAVPassword(id, webdavPassword);
+				const encrypted = encryptCredential(webdavPassword);
 				if (encrypted) {
 					this.settings.mountPoints[idx].encryptedWebdavPassword = encrypted;
 					await this.saveSettings();
@@ -674,9 +769,53 @@ export default class FolderBridgePlugin extends Plugin {
 			const adapter = WebDAVAdapter.fromMount(updatedMount);
 			if (adapter) this.virtualAdapter?.setWebDAVAdapter(id, adapter);
 		} else if (oldMount.mountType === 'webdav') {
-			// Mount type changed away from WebDAV — clean up
 			this.virtualAdapter?.clearWebDAVAdapter(id);
-			WebDAVAdapter.clearPassword(id);
+			clearWebDAVPassword(id);
+		}
+
+		if (updatedMount.mountType === 's3') {
+			const { s3SecretKey } = newData as MountPoint;
+			if (s3SecretKey) {
+				saveSessionCredential('s3', id, s3SecretKey);
+				const encrypted = encryptCredential(s3SecretKey);
+				if (encrypted) {
+					this.settings.mountPoints[idx].encryptedS3SecretKey = encrypted;
+					await this.saveSettings();
+				}
+			}
+			this.virtualAdapter?.clearS3Adapter(id);
+			const s3 = S3Adapter.fromMount(updatedMount);
+			if (s3) this.virtualAdapter?.setS3Adapter(id, s3);
+		} else if (oldMount.mountType === 's3') {
+			this.virtualAdapter?.clearS3Adapter(id);
+			clearSessionCredential('s3', id);
+		}
+
+		if (updatedMount.mountType === 'sftp') {
+			const { sftpPassword, sftpPassphrase } = newData as MountPoint;
+			if (sftpPassword) {
+				saveSessionCredential('sftp-pw', id, sftpPassword);
+				const encrypted = encryptCredential(sftpPassword);
+				if (encrypted) {
+					this.settings.mountPoints[idx].encryptedSftpPassword = encrypted;
+					await this.saveSettings();
+				}
+			}
+			if (sftpPassphrase) {
+				saveSessionCredential('sftp-pp', id, sftpPassphrase);
+				const encrypted = encryptCredential(sftpPassphrase);
+				if (encrypted) {
+					this.settings.mountPoints[idx].encryptedSftpPassphrase = encrypted;
+					await this.saveSettings();
+				}
+			}
+			this.virtualAdapter?.clearSFTPAdapter(id);
+			const sftpAdapter = SFTPAdapter.fromMount(updatedMount);
+			if (sftpAdapter) this.virtualAdapter?.setSFTPAdapter(id, sftpAdapter);
+		} else if (oldMount.mountType === 'sftp') {
+			this.virtualAdapter?.clearSFTPAdapter(id);
+			clearSessionCredential('sftp-pw', id);
+			clearSessionCredential('sftp-pp', id);
 		}
 
 		new Notice(`Folder Bridge: Updated "${updatedMount.virtualPath}"`);
@@ -962,9 +1101,13 @@ export default class FolderBridgePlugin extends Plugin {
 				try {
 					if (mount.mountType === 'webdav') {
 						const adapter = WebDAVAdapter.fromMount(mount);
-						if (adapter) {
-							reachable = await adapter.exists(mount.realPath);
-						}
+						if (adapter) reachable = await adapter.exists(mount.realPath);
+					} else if (mount.mountType === 's3') {
+						const s3 = S3Adapter.fromMount(mount);
+						if (s3) reachable = (await s3.testConnection()) === null;
+					} else if (mount.mountType === 'sftp') {
+						const sftpAdapter = SFTPAdapter.fromMount(mount);
+						if (sftpAdapter) reachable = (await sftpAdapter.testConnection()) === null;
 					} else {
 						// Local mounts require Node.js fs — unavailable on mobile
 						if (fs && fs.promises) {
@@ -1012,6 +1155,12 @@ export default class FolderBridgePlugin extends Plugin {
 			if (mount.mountType === 'webdav') {
 				const adapter = WebDAVAdapter.fromMount(mount);
 				if (adapter) reachable = await adapter.exists(mount.realPath);
+			} else if (mount.mountType === 's3') {
+				const s3 = S3Adapter.fromMount(mount);
+				if (s3) reachable = (await s3.testConnection()) === null;
+			} else if (mount.mountType === 'sftp') {
+				const sftpAdapter = SFTPAdapter.fromMount(mount);
+				if (sftpAdapter) reachable = (await sftpAdapter.testConnection()) === null;
 			} else {
 				if (fs && fs.promises) {
 					const realPath = this.pathMapper.getEffectiveRealPath(mount);
@@ -1449,8 +1598,15 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 						version: '1',
 						exportedAt: new Date().toISOString(),
 						mountPoints: this.plugin.settings.mountPoints.map(m => {
+							// Strip all stored credentials — device-specific and useless on other machines
 							// eslint-disable-next-line @typescript-eslint/no-unused-vars
-							const { encryptedWebdavPassword, webdavPassword, ...rest } = m;
+							const {
+								encryptedWebdavPassword, webdavPassword,
+								encryptedS3SecretKey, s3SecretKey,
+								encryptedSftpPassword, sftpPassword,
+								encryptedSftpPassphrase, sftpPassphrase,
+								...rest
+							} = m;
 							return rest;
 						}),
 					};
@@ -1492,8 +1648,16 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 									...m,
 									id: generateId(),
 									deviceId: this.plugin.settings.deviceId,
+									// Strip all stored credentials so the imported mount
+									// doesn't carry encrypted blobs that can't be decrypted on this device.
 									encryptedWebdavPassword: undefined,
 									webdavPassword: undefined,
+									encryptedS3SecretKey: undefined,
+									s3SecretKey: undefined,
+									encryptedSftpPassword: undefined,
+									sftpPassword: undefined,
+									encryptedSftpPassphrase: undefined,
+									sftpPassphrase: undefined,
 								};
 								await this.plugin.addMount(fresh);
 								added++;

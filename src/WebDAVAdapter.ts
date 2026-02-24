@@ -1,6 +1,7 @@
 import { createClient, WebDAVClient, FileStat } from 'webdav';
 import { normalizePath } from 'obsidian';
 import { MountPoint } from './types';
+import { saveWebDAVPassword, loadWebDAVPassword, clearWebDAVPassword } from './CredentialStore';
 
 /**
  * WebDAVAdapter wraps the `webdav` npm client and exposes the same
@@ -37,23 +38,15 @@ export class WebDAVAdapter {
     // ------------------------------------------------------------------
 
     static savePassword(mountId: string, password: string): void {
-        try {
-            sessionStorage.setItem(`folderbridge-webdav-pw-${mountId}`, password);
-        } catch { /* sessionStorage unavailable */ }
+        saveWebDAVPassword(mountId, password);
     }
 
     static loadPassword(mountId: string): string | null {
-        try {
-            return sessionStorage.getItem(`folderbridge-webdav-pw-${mountId}`);
-        } catch {
-            return null;
-        }
+        return loadWebDAVPassword(mountId);
     }
 
     static clearPassword(mountId: string): void {
-        try {
-            sessionStorage.removeItem(`folderbridge-webdav-pw-${mountId}`);
-        } catch { /* ignore */ }
+        clearWebDAVPassword(mountId);
     }
 
     /** Build a WebDAVAdapter from a MountPoint, using the sessionStorage password. */

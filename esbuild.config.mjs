@@ -11,6 +11,39 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === 'production');
 
+/**
+ * Stub plugin for native Node.js addons (.node files).
+ *
+ * ssh2 (a dependency of ssh2-sftp-client) ships a native crypto accelerator
+ * but falls back gracefully to pure-JS crypto when the native binding is
+ * unavailable.  Since esbuild cannot bundle .node binaries, we intercept
+ * any require() for them and return a module that throws at call-time
+ * (which triggers the pure-JS fallback path inside ssh2).
+ */
+const nativeNodeModulesPlugin = {
+	name: 'native-node-modules',
+	setup(build) {
+		// Intercept .node file imports and mark them as the special namespace
+		build.onResolve({ filter: /\.node$/ }, args => ({
+			path: args.path,
+			namespace: 'node-native-stub',
+		}));
+		// Return a stub that throws — ssh2 catches this and uses pure-JS crypto
+		build.onLoad({ filter: /.*/, namespace: 'node-native-stub' }, () => ({
+			contents: `
+module.exports = new Proxy({}, {
+  get(_, key) {
+    return function() {
+      throw new Error('[Folder Bridge] Native module not available in bundled context: ' + key);
+    };
+  }
+});
+`,
+			loader: 'js',
+		}));
+	},
+};
+
 const context = await esbuild.context({
 	banner: {
 		js: banner,
@@ -33,6 +66,7 @@ const context = await esbuild.context({
 		'@lezer/highlight',
 		'@lezer/lr',
 		...builtins],
+	plugins: [nativeNodeModulesPlugin],
 	format: 'cjs',
 	target: 'es2018',
 	logLevel: "info",

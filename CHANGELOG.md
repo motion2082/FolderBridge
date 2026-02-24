@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-24
+
+### Added
+- **S3 / Backblaze B2 mounts** — mount any Amazon S3 bucket or Backblaze B2 bucket (via the S3-compatible API) as a virtual vault folder.
+  - Quick-fill presets for Amazon S3, Backblaze B2, MinIO, and Cloudflare R2.
+  - Configurable key prefix, force-path-style toggle, OS-keychain-encrypted secret key.
+  - Rename = CopyObject + DeleteObject (S3 has no atomic rename).
+  - ListObjectsV2 with delimiter for correct virtual-folder directory semantics.
+  - Health-check via lightweight ListObjectsV2 MaxKeys=1 probe.
+  - Available on desktop and mobile (HTTP-based, no Node.js fs required).
+- **SFTP mounts** — mount any remote SSH/SFTP directory as a virtual vault folder.
+  - Password and private-key authentication (with OS-keychain-encrypted passphrase).
+  - Persistent auto-reconnecting SFTP connection per mount.
+  - Server-side atomic rename; health-check via lightweight connection test.
+  - Desktop-only (requires Node.js net/crypto).
+- **Generalised CredentialStore** — `encryptCredential`/`decryptCredential` replace WebDAV-specific aliases (aliases kept for backward compat). Generic session helpers keyed by `<service>-<mountId>`.
+- Mount type dropdown now lists five types: Local, Vault, WebDAV, S3/B2, SFTP. Mobile shows WebDAV and S3 only.
+- Export/import now strips all credential types (S3 secret, SFTP password, SFTP passphrase).
+
+### Changed
+- `SecurityManager` skips local-path checks for cloud mount types (WebDAV, S3, SFTP).
+- `FileWatcher` skips S3 and SFTP mounts (no local filesystem to watch).
+- `VirtualAdapter` exposes `setS3Adapter`/`clearS3Adapter`/`setSFTPAdapter`/`clearSFTPAdapter`.
+- `addMount`/`removeMount`/`updateMount` strip transient credentials and wire/tear-down adapters per type.
+
+### Fixed
+- `getMountStatus()` returns placeholder "reachable" for S3 and SFTP mounts, preventing spurious error badges during initial load.
+
 ## [1.1.6] - 2026-02-24
 
 ### Added
