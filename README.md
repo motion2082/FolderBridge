@@ -85,50 +85,216 @@ Then in Obsidian: **Settings → Community Plugins → disable Safe Mode → ena
 ## Quick Start
 
 1. Click the **folder-plus** ribbon icon (or go to **Settings → Folder Bridge → Add Mount Point**)
-2. **Real path** — click **Browse…** to open the system folder picker, or type the absolute path directly
-   - Windows example: `C:\Users\YourName\Documents\Work`
-   - Linux / macOS example: `/home/yourname/Documents/Work`
-   - WSL folder from Windows: `\\wsl.localhost\Ubuntu\home\yourname\Work`
-3. **Virtual path** — where the folder will appear inside your vault, e.g. `Projects/Work`
-   - Click **Browse vault…** to pick an existing vault folder as the parent
-   - Leave empty to mount at vault root using the real folder's name
-4. Optionally enable **Use folder name as label** to auto-fill the display name, or type a custom label
-5. Click **Validate & Add**
+2. Select the **Mount Type** (Local folder, WebDAV server, or Another Obsidian vault)
+3. Fill in the **Real path** and **Virtual path**, then click **Validate & Add**
 
-The folder appears immediately in Obsidian's file explorer — no restart needed. Files are read
-and written directly from their original location; nothing is copied or moved.
+The folder appears immediately in Obsidian's file explorer — no restart needed.
+
+For full step-by-step instructions on each mount type and feature, see the [Usage Guide](#usage-guide) below.
 
 ---
 
-## Settings
+## Usage Guide
+
+### Adding a Local Mount
+
+1. Click the **folder-plus** ribbon icon, or go to **Settings → Folder Bridge** and click **Add Mount Point**
+2. In the **Mount Type** dropdown, select **Local folder**
+3. **Real path** — click **Browse…** to open the OS folder picker, or type the absolute path  
+   - Windows: `C:\Users\YourName\Documents\Work`  
+   - Linux / macOS: `/home/yourname/Documents/Work`  
+   - WSL path from Windows: `\\wsl.localhost\Ubuntu\home\yourname\Work`  
+   - UNC network path: `\\server\share\documents`
+4. **Virtual path** — where the folder will appear inside your vault, e.g. `Projects/Work`  
+   - Click **Browse vault…** to pick an existing vault folder as the parent  
+   - Leave empty to mount at vault root using the real folder's name
+5. Optionally set a **Label** for the mount (shown in the settings list)
+6. Optionally enable **Read-only** to block all writes through this mount
+7. Click **Validate & Add**
+
+The folder appears immediately in Obsidian's file explorer. No restart needed.
+
+---
+
+### Adding a WebDAV Mount
+
+Mount a remote Nextcloud, ownCloud, or generic WebDAV server as a vault folder.
+
+1. Click **Add Mount Point** and select **WebDAV server** in the **Mount Type** dropdown
+2. **Server URL** — the full URL to your WebDAV server, e.g.:
+   - Nextcloud: `https://cloud.example.com/remote.php/dav/files/username`
+   - Generic: `https://dav.example.com`
+3. **Remote path** — the path on the server to mount, e.g. `/Documents/Notes`
+4. **Virtual path** — where it will appear in your vault, e.g. `Remote/Notes`
+5. **Username** — your WebDAV username
+6. **Password** — your WebDAV password  
+   > ⚠️ The password is stored in **session memory only**. It is never written to `data.json` or synced to other devices. You will be prompted again when Obsidian restarts.
+7. Click **Validate & Add**
+
+Folder Bridge will test the connection before saving. If the server is unreachable, you'll see an error with the reason.
+
+---
+
+### Vault-to-Vault Bridging
+
+Browse a folder from a second Obsidian vault inside your current one without duplicating files.
+
+1. Click **Add Mount Point** and select **Another Obsidian vault** in the **Mount Type** dropdown
+2. **Real path** — click **Browse…** and navigate to the **root folder** of the other vault (the folder that contains the `.obsidian` directory)
+3. Optionally narrow to a **sub-folder** of that vault by specifying a relative path inside it
+4. Set a **Virtual path** where it will appear in your current vault, e.g. `Reference`
+5. Click **Validate & Add**
+
+Folder Bridge automatically adds `.obsidian`, `.trash`, and `.smart-connections` to the ignore list for vault mounts to prevent the two vaults from interfering with each other.
+
+---
+
+### Editing an Existing Mount
+
+All mount settings can be changed without deleting and re-adding the mount.
+
+1. Open **Settings → Folder Bridge**
+2. Click the **Edit** (pencil) button on any mount row
+3. Change any field — virtual path, real path, label, read-only flag, or watcher settings
+4. Click **Save**
+
+The vault tree, file watcher, and all internal caches update live. No restart needed.
+
+---
+
+### Reordering Mounts
+
+The order of mounts in the list determines the order they are checked during path resolution.
+
+- **Drag** a mount row up or down in **Settings → Folder Bridge** to reorder it
+- The new order is saved immediately
+
+---
+
+### Moving a Mount in the File Explorer
+
+You can change a mount's virtual path directly from Obsidian's file explorer without opening Settings.
+
+**Option 1 — Drag and drop:**
+1. In the file explorer, click and hold the mounted folder
+2. Drag it to a new location in the vault hierarchy
+3. The virtual path updates live — nothing on disk is touched
+
+**Option 2 — Context menu:**
+1. Right-click the mounted folder root in the file explorer
+2. Select **Move mount to…**
+3. Choose a new parent folder from the vault picker
+4. Click **Move**
+
+---
+
+### Read-Only Mounts
+
+Prevent any write operations through a specific mount (useful for reference folders or shared network drives you don't own).
+
+- Enable the **Read-only** toggle when adding or editing a mount
+- Obsidian will still be able to open, search, and read all files in the mount
+- Any attempt to create, edit, rename, or delete a file through the mount will be blocked with a clear error
+
+---
+
+### Ignore List
+
+Hide specific files or folders inside a mount from Obsidian. Useful for large directories (`node_modules`, build outputs) that would slow down indexing.
+
+**Adding entries manually:**
+1. Open **Settings → Folder Bridge**, expand the mount, and go to the **Ignore List** section
+2. Type a pattern and click **Add**
+
+**Adding entries with the folder picker (Browse…):**
+1. Click the **Browse…** button next to the ignore list input
+2. The OS folder picker opens inside the mount's real directory
+3. Navigate to the subfolder you want to ignore and click **OK**
+4. The mount-relative path is filled in automatically — review it and click **Add**
+
+**Adding entries from the file explorer:**
+1. Right-click any file or folder inside a mounted directory
+2. Select **Ignore in Folder Bridge**
+3. The entry is added immediately and the item disappears from the file explorer
+
+**Pattern types:**
+
+| Pattern | Behaviour | Example |
+|---------|-----------|---------|
+| Plain name | Matches any file or folder with that leaf name anywhere in the mount | `node_modules` |
+| Path prefix (contains `/`) | Matches only that exact subtree | `assets/vendor/plantuml-stdlib` |
+| Glob (contains `*`) | Matches leaf names against the glob | `*.tmp`, `~$*`, `build*` |
+
+---
+
+### Conflict Resolution & Health Monitoring
+
+Folder Bridge checks every active mount for reachability every **30 seconds** in the background.
+
+**When a mount goes offline** (drive disconnected, network drop, WebDAV server unreachable):
+- An **orange indicator** appears in the Obsidian status bar
+- Click the indicator to open the **Conflict Resolution panel**
+- The panel shows every affected mount with its last-known error
+- Click **Reconnect** next to a mount to retry it immediately
+
+**When all mounts are reachable:**
+- The status bar indicator turns **green** (if visible) or disappears, depending on your settings
+
+---
+
+### Per-Mount Watcher Tuning
+
+Each mount has independent file-watcher settings. Open **Edit** on any mount to see:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Debounce (ms)** | 300 | How long to wait after the last file-change event before notifying Obsidian. Lower = more responsive; higher = less CPU on rapid saves. |
+| **Use polling** | Off | Enable stat-based polling instead of native OS watch events. Required for most network drives and some containerised filesystems. |
+| **Polling interval (ms)** | 2000 | How frequently to poll when polling mode is on. Has no effect when polling is off. |
+| **Max files** | 10 000 | Stop scanning a directory tree after this many entries. Protects performance on very large mounts. |
+
+> **Tip:** For a local SSD, leave all defaults. For a Samba/NFS network share, enable **Use polling** and set the interval to 3000–5000 ms to avoid hammering the server.
+
+---
+
+### Device-Specific Paths (Multi-Device Sync)
+
+Each mount is tagged with the `deviceId` of the machine that created it. When your vault syncs to another device, that device's Obsidian will see the mount but won't activate it unless the path also exists there.
+
+**To map a mount to a different path on another device:**
+
+1. On the second device, open **Settings → Folder Bridge**
+2. Find the mount (it will show a warning badge if the original path doesn't exist locally)
+3. Click **Override Path** and enter the correct local path for this device
+4. Click **Save**
+
+The override applies only to this device; the original path is preserved for the device that created it.
+
+**To let all mounts from other devices activate automatically (if paths match):**
+- Enable **Allow foreign mounts** in **Settings → Folder Bridge**
+
+---
+
+## Settings Reference
 
 | Setting | Description |
 |---------|-------------|
-| **Dry-run mode** | Log all writes to console without executing them. Safe for testing. |
-| **Show status bar item** | Display active mount count in Obsidian's status bar. |
-| **Mount list** | Enable, disable, or remove individual mounts. Each mount shows a live reachability badge. |
-| **Allow foreign mounts** | Allow mounts created on other devices to be active if the path exists locally. |
-| **Ignore list** | Hide specific files or folders (e.g., `node_modules`, `*.tmp`) from Obsidian. |
+| **Dry-run mode** | Log all write operations to the console without executing them. Safe for testing configuration changes. |
+| **Show status bar item** | Display the active mount count (and health indicator) in Obsidian's status bar. |
+| **Allow foreign mounts** | Activate mounts created on other devices if the real path exists on this machine. |
+| **Mount list** | Enable, disable, edit, or remove individual mounts. Each row shows a live reachability badge and drag handle. |
 
 ---
 
 ## Sync Compatibility (Obsidian Sync / Syncthing)
 
-Folder Bridge is designed to work safely with sync engines. When you create a mount, it is tagged with a unique `deviceId` for your current Obsidian instance. This prevents other devices from attempting to mount paths that don't exist locally.
-
-If you sync your vault to another device:
-- **Identical Paths**: If the external folder exists at the exact same path on both devices, you can enable **Allow foreign mounts** in the settings to automatically activate it.
-- **Different Paths**: If the external folder is located elsewhere on the second device, you can click the **Override Path** button next to the mount in the settings to map it to the correct local path for that specific device.
+Folder Bridge is designed to work safely with sync engines. Mounts are device-scoped and do not sync real filesystem paths to other machines. See [Device-Specific Paths](#device-specific-paths-multi-device-sync) above for cross-device setup.
 
 ---
 
-## Ignore List
+## Ignore List (Legacy Section)
 
-You can hide specific files or folders from Obsidian to improve performance and reduce clutter. This is especially useful for large directories like `node_modules` or build outputs.
-
-- **Exact Match**: Enter the exact name of the file or folder (e.g., `node_modules`).
-- **Glob Patterns**: Use `*` as a wildcard (e.g., `*.tmp`, `build*`).
-- **Context Menu**: Right-click any file or folder inside a mounted directory in Obsidian's file explorer and select **Ignore in Folder Bridge** to quickly add it to the list.
+See [Ignore List](#ignore-list) in the Usage Guide above for full documentation.
 
 ---
 
