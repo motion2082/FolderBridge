@@ -1,15 +1,22 @@
-import * as chokidar from 'chokidar';
-import * as path from 'path';
-import { App, normalizePath } from 'obsidian';
+// Type-only import — no runtime require, so chokidar's Node.js dependencies are
+// never evaluated at bundle-load time on Obsidian Mobile.
+import type * as Chokidar from 'chokidar';
+import { App, normalizePath, Platform } from 'obsidian';
 import { MountPoint } from './types';
 import { PathMapper } from './PathMapper';
-import * as fs from 'fs';
 
 export class FileWatcher {
     private app: App;
     private pathMapper: PathMapper;
     private isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean;
-    private watchers: Map<string, chokidar.FSWatcher> = new Map();
+    private watchers: Map<string, Chokidar.FSWatcher> = new Map();
+
+    /**
+     * Chokidar loader — resolved lazily so Node.js fs/events are never loaded on
+     * Obsidian Mobile.  Can be overridden in tests to inject a mock.
+     */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    static _loadChokidar: () => typeof Chokidar = () => (require as any)('chokidar');
 
     /**
      * Per-path debounce timers for 'file-changed' events.  Keyed by real path
@@ -29,6 +36,14 @@ export class FileWatcher {
      * Start watching a mount point for changes.
      */
     startWatching(mount: MountPoint): void {
+        // Chokidar requires Node.js fs/events APIs that are unavailable in Obsidian's
+        // Capacitor WebView on Android / iOS.  Skip file watching on mobile entirely;
+        // the vault is refreshed manually or via WebDAV polling.
+        if (Platform.isMobile) {
+            console.debug(`[FolderBridge] Skipping file watcher on mobile for: ${mount.virtualPath}`);
+            return;
+        }
+
         // WebDAV mounts are accessed over HTTP — there is no local filesystem path
         // to watch for native change events.  Polling over HTTP is not supported by
         // chokidar, so we skip the watcher for WebDAV mounts entirely.
@@ -43,9 +58,17 @@ export class FileWatcher {
 
         const realPath = this.pathMapper.getEffectiveRealPath(mount);
 
+        // Load Node.js modules lazily — these are only available on desktop.
+        // Uses FileWatcher._loadChokidar so tests can supply a mock by reassigning it.
+        const chokidar = FileWatcher._loadChokidar();
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+        const fs = (require as any)('fs') as typeof import('fs');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+        const path = (require as any)('path') as typeof import('path');
+
         // [FEATURE_20260222] Initialize chokidar watcher for the mount's real path
         const watcher = chokidar.watch(realPath, {
-            ignored: (testPath: string, stats?: fs.Stats) => {
+            ignored: (testPath: string, stats?: import('fs').Stats) => {
                 // Ignore hidden files/folders and node_modules
                 const name = path.basename(testPath);
                 if (name.startsWith('.') || name === 'node_modules') return true;

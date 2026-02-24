@@ -1,13 +1,25 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import { Platform } from 'obsidian';
 import { OSPlatform } from './types';
+
+// Lazy-loaded Node.js builtins — safe on Obsidian Mobile (Capacitor) where
+// Node APIs are unavailable.  On mobile these will be null; all functions
+// guarded behind platform checks or try-catch will gracefully return early.
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const fs: typeof import('fs') = (() => { try { return (require as any)('fs'); } catch { return null as never; } })();
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const path: typeof import('path') = (() => { try { return (require as any)('path'); } catch { return null as never; } })();
 
 // ---------------------------------------------------------------------------
 // Platform detection
 // ---------------------------------------------------------------------------
 
 export function getPlatform(): OSPlatform {
-	switch (process.platform) {
+	// On Obsidian Mobile (Capacitor / Android / iOS), the Node.js `process`
+	// global is not available.  Fall back to the Obsidian Platform API instead.
+	if (Platform.isMobile) return 'unknown';
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const platform = (typeof process !== 'undefined') ? process.platform : undefined;
+	switch (platform) {
 		case 'win32': return 'windows';
 		case 'linux': return 'linux';
 		case 'darwin': return 'mac';
@@ -116,7 +128,7 @@ export async function areDifferentDevices(pathA: string, pathB: string): Promise
 			fs.promises.stat(pathB).catch(() => null),
 		]);
 		if (!statA || !statB) return false;
-		return (statA as fs.Stats & { dev: number }).dev !== (statB as fs.Stats & { dev: number }).dev;
+		return (statA as import('fs').Stats & { dev: number }).dev !== (statB as import('fs').Stats & { dev: number }).dev;
 	} catch {
 		return false;
 	}
@@ -148,6 +160,8 @@ export function normalizeRealPath(realPath: string): string {
  * bypasses the vault root restriction.
  */
 export function realPathToResourceUrl(realPath: string): string {
+	// On mobile, path module is unavailable; return a no-op URL.
+	if (!path) return realPath;
 	// app://local/ is the Electron protocol handler that serves ANY local file
 	// path, regardless of whether it is inside the vault.  Do NOT use
 	// window.app.appId here — that vault-hash host only resolves paths that are
@@ -194,7 +208,7 @@ const DATA_URI_MIME: Record<string, string> = {
 	'.pdf': 'application/pdf',
 };
 
-/** Maximum file size that we will read synchronously to produce a data: URI. */
+/** Default maximum file size that we will read synchronously to produce a data: URI. */
 const MAX_SYNC_DATA_URI_BYTES = 10 * 1024 * 1024; // 10 MB
 
 /**
@@ -214,13 +228,15 @@ const MAX_SYNC_DATA_URI_BYTES = 10 * 1024 * 1024; // 10 MB
  * resolve to ERR_FILE_NOT_FOUND.  A data: URI is the only reliable,
  * CSP-compliant way to embed external binary assets in the renderer.
  */
-export function tryReadAsDataUri(realPath: string): string | null {
+export function tryReadAsDataUri(realPath: string, maxBytes = MAX_SYNC_DATA_URI_BYTES): string | null {
+	// Node.js APIs unavailable on mobile — all local file reads return null.
+	if (!fs || !path) return null;
 	const ext = path.extname(realPath).toLowerCase();
 	const mime = DATA_URI_MIME[ext];
 	if (!mime) return null;
 	try {
 		const stat = fs.statSync(realPath);
-		if (stat.size > MAX_SYNC_DATA_URI_BYTES) return null;
+		if (stat.size > maxBytes) return null;
 		const data = fs.readFileSync(realPath);
 		return `data:${mime};base64,${data.toString('base64')}`;
 	} catch {
@@ -302,7 +318,9 @@ export function isReservedWindowsFilename(name: string): boolean {
  */
 export function isWSL(): boolean {
 	if (getPlatform() !== 'linux') return false;
-	if (process.env.WSL_DISTRO_NAME || process.env.WSLENV) return true;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const env = (typeof process !== 'undefined' && (process as any).env) ? process.env : {};
+	if (env.WSL_DISTRO_NAME || env.WSLENV) return true;
 	try {
 		const version = fs.readFileSync('/proc/version', 'utf8');
 		return /microsoft|wsl/i.test(version);

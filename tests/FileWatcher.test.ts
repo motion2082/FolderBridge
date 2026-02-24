@@ -5,17 +5,18 @@ import { PathMapper } from '../src/PathMapper';
 import type { MountPoint } from '../src/types';
 
 // ── Chokidar mock ─────────────────────────────────────────────────────────────
-// vi.hoisted ensures the variables are initialised before vi.mock hoists the factory.
-const { mockWatcherOn, mockWatcherClose, mockWatcherInstance, mockChokidarWatch } = vi.hoisted(() => {
-    const on = vi.fn();
-    const close = vi.fn();
-    const instance = { on, close } as unknown as import('chokidar').FSWatcher;
-    on.mockReturnValue(instance); // make .on() chainable
-    const watch = vi.fn(() => instance);
-    return { mockWatcherOn: on, mockWatcherClose: close, mockWatcherInstance: instance, mockChokidarWatch: watch };
-});
+// We patch FileWatcher._loadChokidar (a static property) so tests never call
+// the real require('chokidar') and don't need vi.mock().
+const on = vi.fn();
+const close = vi.fn();
+const mockWatcherInstance = { on, close } as unknown as import('chokidar').FSWatcher;
+on.mockReturnValue(mockWatcherInstance); // make .on() chainable
+const mockChokidarWatch = vi.fn(() => mockWatcherInstance);
+const mockWatcherOn = on;
+const mockWatcherClose = close;
 
-vi.mock('chokidar', () => ({ watch: mockChokidarWatch }));
+// Install the mock before any describe blocks run
+FileWatcher._loadChokidar = () => ({ watch: mockChokidarWatch } as unknown as typeof import('chokidar'));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

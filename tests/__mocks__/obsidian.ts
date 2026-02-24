@@ -8,3 +8,13 @@ export function normalizePath(p: string): string {
 		.replace(/^\/+/, '')    // no leading slash
 		.replace(/\/+$/, '');   // no trailing slash
 }
+
+/** Platform stub — always simulates desktop in unit tests. */
+export const Platform = {
+	isMobile: false,
+	isDesktop: true,
+	isMobileApp: false,
+	isDesktopApp: true,
+	isIosApp: false,
+	isAndroidApp: false,
+};

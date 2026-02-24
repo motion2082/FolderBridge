@@ -1,8 +1,11 @@
-import { App, Modal, Notice, Setting, SuggestModal, TFolder, TextComponent, normalizePath } from 'obsidian';
-import * as path from 'path';
+import { App, Modal, Notice, Platform, Setting, SuggestModal, TFolder, TextComponent, normalizePath } from 'obsidian';
 import { MountPoint, MountStatus, MountType } from '../types';
 import { SecurityManager } from '../SecurityManager';
 import { checkPathAccessible, isDirectory, getPlatform, isWSL } from '../OSHelpers';
+
+// Lazy-loaded — unavailable on Obsidian Mobile (Capacitor).
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const path: typeof import('path') = (() => { try { return (require as any)('path'); } catch { return null as never; } })();
 
 // ---------------------------------------------------------------------------
 // Electron folder-picker helper
@@ -177,10 +180,16 @@ export class MountManagerModal extends Modal {
 		contentEl.empty();
 		contentEl.createEl('h2', { text: this.editMount ? 'Edit Mount Point' : 'Add Mount Point' });
 
+		const isMobile = Platform.isMobile;
 		const platform = getPlatform();
 		const wsl = isWSL();
 
-		// ── Mount type selector ────────────────────────────────────────────
+		// On mobile, only WebDAV mounts are supported (no local fs access).
+		if (isMobile && this.mountType !== 'webdav') {
+			this.mountType = 'webdav';
+		}
+
+		// ── Mount type selector ─────────────────────────────────────────────
 		const localSection = contentEl.createDiv();
 		const vaultSection = contentEl.createDiv();
 		const webdavSection = contentEl.createDiv();
@@ -192,15 +201,28 @@ export class MountManagerModal extends Modal {
 			webdavSection.style.display = type === 'webdav' ? '' : 'none';
 		};
 
-		new Setting(contentEl)
-			.setName('Mount type')
-			.setDesc('Choose between a local filesystem folder, another Obsidian vault, or a WebDAV server')
-			.addDropdown(drop => drop
-				.addOption('local', 'Local filesystem')
-				.addOption('vault', 'Another Obsidian vault')
-				.addOption('webdav', 'WebDAV (Nextcloud, ownCloud, generic)')
-				.setValue(this.mountType)
-				.onChange(val => toggleSections(val as MountType)));
+		if (isMobile) {
+			// On mobile, hide the dropdown and only allow WebDAV
+			contentEl.createEl('p', {
+				text: '📱 On mobile, only WebDAV mounts are supported. Local filesystem and vault mounts require Obsidian Desktop.',
+				cls: 'setting-item-description',
+			});
+			contentEl.createEl('p', {
+				text: '💡 To access files on this device, install a WebDAV server app (e.g. CX File Explorer) and connect to http://localhost:PORT/',
+				cls: 'setting-item-description',
+			});
+			toggleSections('webdav');
+		} else {
+			new Setting(contentEl)
+				.setName('Mount type')
+				.setDesc('Choose between a local filesystem folder, another Obsidian vault, or a WebDAV server')
+				.addDropdown(drop => drop
+					.addOption('local', 'Local filesystem')
+					.addOption('vault', 'Another Obsidian vault')
+					.addOption('webdav', 'WebDAV (Nextcloud, ownCloud, generic)')
+					.setValue(this.mountType)
+					.onChange(val => toggleSections(val as MountType)));
+		} // end else (desktop only)
 
 		// ── Vault section (shown when type === 'vault') ────────────────────
 		vaultSection.createEl('p', {
@@ -435,6 +457,8 @@ export class MountManagerModal extends Modal {
 				.onChange(val => { this.readOnly = val; }));
 		// ── Advanced (collapsible) ─────────────────────────────────────────────
 		const details = contentEl.createEl('details', { cls: 'folderbridge-advanced' });
+		// File-watcher settings are desktop-only; hide the entire Advanced section on mobile.
+		if (isMobile) details.style.display = 'none';
 		details.style.marginTop = '12px';
 		details.style.marginBottom = '8px';
 		details.style.border = '1px solid var(--background-modifier-border)';

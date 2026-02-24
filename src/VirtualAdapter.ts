@@ -1,6 +1,4 @@
 import { normalizePath } from 'obsidian';
-import * as fs from 'fs';
-import * as path from 'path';
 import { PathMapper } from './PathMapper';
 import { SecurityManager } from './SecurityManager';
 import { MountPoint } from './types';
@@ -13,6 +11,14 @@ import {
 	translateFsError,
 	isCloudPlaceholder,
 } from './OSHelpers';
+
+// Lazy-loaded Node.js builtins — wrapped in try/catch so the bundle loads on
+// Obsidian Mobile (Capacitor) where Node APIs are unavailable.  On mobile these
+// will be null; local-mount operations gracefully fail while WebDAV mounts work.
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const fs: typeof import('fs') = (() => { try { return (require as any)('fs'); } catch { return null as never; } })();
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const path: typeof import('path') = (() => { try { return (require as any)('path'); } catch { return null as never; } })();
 
 /**
  * VirtualAdapter is a shim that wraps Obsidian's built-in FileSystemAdapter.
@@ -36,12 +42,15 @@ export class VirtualAdapter {
 	private isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean;
 	/** WebDAV client instances keyed by mount.id, managed by the plugin. */
 	private webdavAdapters: Map<string, WebDAVAdapter> = new Map();
+	/** Max bytes for data: URI generation; configurable via plugin settings. */
+	private maxDataUriBytes: number;
 
 	constructor(
 		original: unknown,
 		pathMapper: PathMapper,
 		security: SecurityManager,
 		dryRun = false,
+		maxDataUriBytes = 10 * 1024 * 1024,
 		onMountRootDelete: (mount: MountPoint) => Promise<'unmount' | 'delete' | 'cancel'>,
 		onMountRootMove: (mount: MountPoint, newVirtualPath: string) => Promise<void>,
 		isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean
@@ -50,6 +59,7 @@ export class VirtualAdapter {
 		this.pathMapper = pathMapper;
 		this.security = security;
 		this.dryRun = dryRun;
+		this.maxDataUriBytes = maxDataUriBytes;
 		this.onMountRootDelete = onMountRootDelete;
 		this.onMountRootMove = onMountRootMove;
 		this.isIgnored = isIgnored;
@@ -67,6 +77,9 @@ export class VirtualAdapter {
 
 	/** Update dry-run mode without reloading the plugin. */
 	setDryRun(val: boolean): void { this.dryRun = val; }
+
+	/** Update the data: URI size cap without reloading the plugin. */
+	setMaxDataUri(bytes: number): void { this.maxDataUriBytes = bytes; }
 
 	// ------------------------------------------------------------------
 	// Delegation helper
@@ -287,7 +300,7 @@ export class VirtualAdapter {
 			? virtualParentPath.slice(mountVirtual.length + 1)
 			: (virtualParentPath === mountVirtual ? '' : undefined);
 
-		let entries: fs.Dirent[];
+		let entries: import('fs').Dirent[];
 		try {
 			entries = await fs.promises.readdir(realDirPath, { withFileTypes: true });
 		} catch (e) {
@@ -522,8 +535,9 @@ export class VirtualAdapter {
 			// Obsidian's renderer calls the vault-level method directly, not this adapter method.
 			// Modern Obsidian (app://<vaultId>/) only serves vault-relative paths, so
 			// external mounts must be served as data: URIs instead.
+			// The size cap is configurable via plugin settings (maxDataUriMB).
 			const realPath = this.pathMapper.toRealPath(normalizedPath, mount);
-			return tryReadAsDataUri(realPath) ?? realPathToResourceUrl(realPath);
+			return tryReadAsDataUri(realPath, this.maxDataUriBytes) ?? realPathToResourceUrl(realPath);
 		}
 		return this.orig().getResourcePath(normalizedPath);
 	}

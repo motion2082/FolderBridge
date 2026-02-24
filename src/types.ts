@@ -37,6 +37,8 @@ export interface FolderBridgeSettings {
 	mountRootDeletionBehavior: 'ask' | 'unmount' | 'delete';
 	deviceId: string;       // Unique ID for this specific device
 	allowForeignMounts: boolean; // Allow mounting paths created on other devices
+	/** Maximum size (in MB) of files that will be served as data: URIs (images, PDFs). */
+	maxDataUriMB: number;
 }
 
 export const DEFAULT_SETTINGS: FolderBridgeSettings = {
@@ -47,6 +49,7 @@ export const DEFAULT_SETTINGS: FolderBridgeSettings = {
 	mountRootDeletionBehavior: 'ask',
 	deviceId: '',
 	allowForeignMounts: false,
+	maxDataUriMB: 10,
 };
 
 export interface MountStatus {

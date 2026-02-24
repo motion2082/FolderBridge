@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, normalizePath, TFolder, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, normalizePath, TFolder, TFile, Platform } from 'obsidian';
 import { FolderBridgeSettings, MountPoint, DEFAULT_SETTINGS } from './src/types';
 import { PathMapper } from './src/PathMapper';
 import { VirtualAdapter } from './src/VirtualAdapter';
@@ -6,10 +6,12 @@ import { SecurityManager } from './src/SecurityManager';
 import { MountManagerModal, getMountStatus, browseFolderOnDisk, VaultFolderPickerModal } from './src/ui/MountManagerModal';
 import { MountRootDeleteModal } from './src/ui/MountRootDeleteModal';
 import { getPlatform, realPathToResourceUrl, tryReadAsDataUri } from './src/OSHelpers';
-import * as path from 'path';
-import * as fs from 'fs';
 import { FileWatcher } from './src/FileWatcher';
 import { WebDAVAdapter } from './src/WebDAVAdapter';
+
+// Lazy-loaded Node.js builtins — safe on Obsidian Mobile (Capacitor).
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const fs: typeof import('fs') = (() => { try { return (require as any)('fs'); } catch { return null as never; } })();
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -98,7 +100,7 @@ export default class FolderBridgePlugin extends Plugin {
 							.setIcon('folder-input')
 							.onClick(() => {
 								new VaultFolderPickerModal(this.app, async (newParent) => {
-									const leaf = path.posix.basename(normalizePath(mount.virtualPath));
+									const leaf = normalizePath(mount.virtualPath).split('/').pop() || '';
 									const newVirtualPath = newParent
 										? normalizePath(`${newParent}/${leaf}`)
 										: leaf;
@@ -266,6 +268,7 @@ export default class FolderBridgePlugin extends Plugin {
 			this.pathMapper,
 			this.security,
 			this.settings.dryRun,
+			(this.settings.maxDataUriMB ?? 10) * 1024 * 1024,
 			async (mount: MountPoint) => {
 				let action: 'unmount' | 'delete' | 'cancel' = 'cancel';
 
@@ -346,7 +349,7 @@ export default class FolderBridgePlugin extends Plugin {
 				// vault-relative paths — external mounts get ERR_FILE_NOT_FOUND.
 				// Serve supported binary assets (images, PDFs) as data: URIs instead.
 				// For large or unsupported files fall back to app://local/ (legacy).
-				return tryReadAsDataUri(realPath) ?? realPathToResourceUrl(realPath);
+				return tryReadAsDataUri(realPath, (this.settings.maxDataUriMB ?? 10) * 1024 * 1024) ?? realPathToResourceUrl(realPath);
 			}
 			// Fallback to original vault method for non-mounted files
 			if (typeof this.originalVaultGetResourcePath === 'function') {
@@ -813,9 +816,12 @@ export default class FolderBridgePlugin extends Plugin {
 							reachable = await adapter.exists(mount.realPath);
 						}
 					} else {
-						const realPath = this.pathMapper.getEffectiveRealPath(mount);
-						await fs.promises.access(realPath, fs.constants.F_OK);
-						reachable = true;
+						// Local mounts require Node.js fs — unavailable on mobile
+						if (fs && fs.promises) {
+							const realPath = this.pathMapper.getEffectiveRealPath(mount);
+							await fs.promises.access(realPath, fs.constants.F_OK);
+							reachable = true;
+						}
 					}
 				} catch {
 					reachable = false;
@@ -857,9 +863,11 @@ export default class FolderBridgePlugin extends Plugin {
 				const adapter = WebDAVAdapter.fromMount(mount);
 				if (adapter) reachable = await adapter.exists(mount.realPath);
 			} else {
-				const realPath = this.pathMapper.getEffectiveRealPath(mount);
-				await fs.promises.access(realPath, fs.constants.F_OK);
-				reachable = true;
+				if (fs && fs.promises) {
+					const realPath = this.pathMapper.getEffectiveRealPath(mount);
+					await fs.promises.access(realPath, fs.constants.F_OK);
+					reachable = true;
+				}
 			}
 		} catch {
 			reachable = false;
@@ -1066,6 +1074,21 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 					this.plugin.settings.allowForeignMounts = val;
 					await this.plugin.saveSettings();
 					this.display(); // Refresh to update toggle states
+				}));
+
+		new Setting(containerEl)
+			.setName('Image / PDF size cap (MB)')
+			.setDesc('Maximum file size that will be embedded as a data: URI (used for images and PDFs in external mounts). Files larger than this fall back to a resource URL. Default: 10 MB.')
+			.addText(text => text
+				.setPlaceholder('10')
+				.setValue(String(this.plugin.settings.maxDataUriMB ?? 10))
+				.onChange(async val => {
+					const parsed = parseFloat(val);
+					if (!isNaN(parsed) && parsed > 0) {
+						this.plugin.settings.maxDataUriMB = parsed;
+						await this.plugin.saveSettings();
+						this.plugin.virtualAdapter?.setMaxDataUri(parsed * 1024 * 1024);
+					}
 				}));
 
 		// ── Ignore Lists ─────────────────────────────────────────────────

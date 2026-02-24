@@ -1,6 +1,5 @@
 import { createClient, WebDAVClient, FileStat } from 'webdav';
 import { normalizePath } from 'obsidian';
-import * as path from 'path';
 import { MountPoint } from './types';
 
 /**
@@ -120,7 +119,9 @@ export class WebDAVAdapter {
         try {
             const contents = await this.client.getDirectoryContents(this.toServerPath(serverPath)) as FileStat[];
             for (const item of contents) {
-                const name = path.basename(item.filename.replace(/\//g, path.sep));
+                // Extract filename without requiring the `path` Node module so
+                // this works on Obsidian Mobile (WebDAV paths always use '/').
+                const name = item.filename.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? '';
                 const virtualChild = virtualParentPath
                     ? normalizePath(virtualParentPath + '/' + name)
                     : name;
