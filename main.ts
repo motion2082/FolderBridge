@@ -206,12 +206,32 @@ export default class FolderBridgePlugin extends Plugin {
 
 	private ignoreCache = new Map<string, { nameStrings: string[], pathStrings: string[], regexes: RegExp[] }>();
 
+	/** Public alias used by the settings UI to refresh after global-pattern changes. */
+	updateIgnoreCachePublic() { this.updateIgnoreCache(); }
+
 	private updateIgnoreCache() {
 		this.ignoreCache.clear();
+
+		// Pre-parse global patterns once
+		const globalList = this.settings.globalIgnorePatterns || [];
+		const globalNameStrings: string[] = [];
+		const globalPathStrings: string[] = [];
+		const globalRegexes: RegExp[] = [];
+		for (const pattern of globalList) {
+			if (pattern.includes('*')) {
+				const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+				globalRegexes.push(new RegExp('^' + escaped.replace(/\*/g, '[^/]*') + '$'));
+			} else if (pattern.includes('/')) {
+				globalPathStrings.push(normalizePath(pattern));
+			} else {
+				globalNameStrings.push(pattern);
+			}
+		}
+
 		for (const mount of this.settings.mountPoints) {
-			const nameStrings: string[] = [];
-			const pathStrings: string[] = []; // patterns that contain '/' — matched as path prefix
-			const regexes: RegExp[] = [];
+			const nameStrings: string[] = [...globalNameStrings];
+			const pathStrings: string[] = [...globalPathStrings];
+			const regexes: RegExp[] = [...globalRegexes];
 			const list = mount.ignoreList || [];
 			for (const pattern of list) {
 				if (pattern.includes('*')) {
@@ -221,7 +241,6 @@ export default class FolderBridgePlugin extends Plugin {
 					const regexStr = '^' + escaped.replace(/\*/g, '[^/]*') + '$';
 					regexes.push(new RegExp(regexStr));
 				} else if (pattern.includes('/')) {
-					// Path-relative pattern: normalize slashes and store
 					pathStrings.push(normalizePath(pattern));
 				} else {
 					nameStrings.push(pattern);
@@ -1122,6 +1141,69 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 
 		// ── Ignore Lists ─────────────────────────────────────────────────
 		new Setting(containerEl).setName('Ignore Lists').setHeading();
+
+		// ── Global ignore patterns ───────────────────────────────────────
+		new Setting(containerEl)
+			.setName('Global ignore patterns')
+			.setDesc('Patterns applied to every mount. Same syntax as per-mount patterns: plain names match any leaf, globs (*.tmp) match leaf names, paths with / match subtrees. Pre-populated with common OS noise files.')
+			.setHeading();
+
+		const globalIgnoreContainer = containerEl.createDiv('folderbridge-global-ignore');
+		globalIgnoreContainer.style.marginBottom = '20px';
+		globalIgnoreContainer.style.padding = '10px';
+		globalIgnoreContainer.style.border = '1px solid var(--background-modifier-border)';
+		globalIgnoreContainer.style.borderRadius = '4px';
+
+		const renderGlobalIgnoreList = () => {
+			globalIgnoreContainer.empty();
+			const list = this.plugin.settings.globalIgnorePatterns || [];
+			if (list.length === 0) {
+				globalIgnoreContainer.createEl('p', { text: 'No global patterns. Files like .DS_Store are visible in all mounts.', cls: 'setting-item-description' });
+			}
+			for (const item of list) {
+				const itemEl = globalIgnoreContainer.createDiv('folderbridge-ignore-item');
+				itemEl.style.display = 'flex';
+				itemEl.style.alignItems = 'center';
+				itemEl.style.justifyContent = 'space-between';
+				itemEl.style.marginBottom = '6px';
+				itemEl.createSpan({ text: item }).style.flexGrow = '1';
+				const removeBtn = itemEl.createEl('button', { text: 'Remove' });
+				removeBtn.onclick = async () => {
+					this.plugin.settings.globalIgnorePatterns = this.plugin.settings.globalIgnorePatterns.filter(i => i !== item);
+					await this.plugin.saveSettings();
+					this.plugin.updateIgnoreCachePublic();
+					renderGlobalIgnoreList();
+				};
+			}
+			const addContainer = globalIgnoreContainer.createDiv();
+			addContainer.style.display = 'flex';
+			addContainer.style.marginTop = '12px';
+			addContainer.style.gap = '8px';
+			const inputEl = addContainer.createEl('input', { type: 'text', placeholder: 'e.g. .DS_Store, Thumbs.db, *.tmp, node_modules' });
+			inputEl.style.flexGrow = '1';
+			const addBtn = addContainer.createEl('button', { text: 'Add' });
+			addBtn.onclick = async () => {
+				const val = inputEl.value.trim();
+				if (val) {
+					if (!this.plugin.settings.globalIgnorePatterns) this.plugin.settings.globalIgnorePatterns = [];
+					if (!this.plugin.settings.globalIgnorePatterns.includes(val)) {
+						this.plugin.settings.globalIgnorePatterns.push(val);
+						await this.plugin.saveSettings();
+						this.plugin.updateIgnoreCachePublic();
+						inputEl.value = '';
+						renderGlobalIgnoreList();
+					}
+				}
+			};
+			inputEl.addEventListener('keypress', e => { if (e.key === 'Enter') addBtn.click(); });
+		};
+		renderGlobalIgnoreList();
+
+		// ── Per-mount ignore lists ────────────────────────────────────────
+		new Setting(containerEl)
+			.setName('Per-mount ignore lists')
+			.setDesc('Patterns applied to a specific mount only.')
+			.setHeading();
 
 		if (this.plugin.settings.mountPoints.length === 0) {
 			containerEl.createEl('p', {

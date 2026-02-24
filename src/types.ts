@@ -46,6 +46,11 @@ export interface FolderBridgeSettings {
 	allowForeignMounts: boolean; // Allow mounting paths created on other devices
 	/** Maximum size (in MB) of files that will be served as data: URIs (images, PDFs). */
 	maxDataUriMB: number;
+	/**
+	 * Patterns applied to EVERY mount, exactly like per-mount ignoreList entries.
+	 * Useful for OS noise files: .DS_Store, Thumbs.db, desktop.ini, etc.
+	 */
+	globalIgnorePatterns: string[];
 }
 
 export const DEFAULT_SETTINGS: FolderBridgeSettings = {
@@ -57,6 +62,7 @@ export const DEFAULT_SETTINGS: FolderBridgeSettings = {
 	deviceId: '',
 	allowForeignMounts: false,
 	maxDataUriMB: 10,
+	globalIgnorePatterns: ['.DS_Store', 'Thumbs.db', 'desktop.ini', '.git'],
 };
 
 export interface MountStatus {
