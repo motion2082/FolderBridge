@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-02-24
+
+### Added
+- **WebDAV connection presets** — a "Quick-fill preset" dropdown appears when adding a new WebDAV mount. Selecting Nextcloud, ownCloud, Synology, or QNAP pre-fills the Server URL field with the correct URL template for that service (including the `/remote.php/dav/files/YOUR_USERNAME` path that trips up Nextcloud/ownCloud users). A hint below the URL field reminds you what to replace.
+
 ## [1.1.2] - 2026-02-24
 
 ### Added

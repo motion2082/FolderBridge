@@ -260,10 +260,53 @@ export class MountManagerModal extends Modal {
 			});
 
 		// ── WebDAV fields (shown when type === 'webdav') ───────────────────
+
+		/* Quick-fill presets — selecting one pre-populates Server URL so users
+		 * don't have to remember the /remote.php/dav/files/USERNAME/ pattern. */
+		const WEBDAV_PRESETS: Record<string, { urlTemplate: string; note: string }> = {
+			nextcloud:  { urlTemplate: 'https://cloud.example.com/remote.php/dav/files/YOUR_USERNAME', note: 'Replace cloud.example.com and YOUR_USERNAME with your values.' },
+			owncloud:   { urlTemplate: 'https://cloud.example.com/remote.php/dav/files/YOUR_USERNAME', note: 'Replace cloud.example.com and YOUR_USERNAME with your values.' },
+			synology:   { urlTemplate: 'https://nas.example.com/webdav',  note: 'Enable WebDAV in Synology Control Panel → File Services → WebDAV.' },
+			qnap:       { urlTemplate: 'https://nas.example.com:8080/webdav', note: 'Enable WebDAV in QNAP Control Panel → Web Server → WebDAV Server.' },
+		};
+
+		let presetNoteEl: HTMLParagraphElement | null = null;
+		let webdavUrlText: import('obsidian').TextComponent | null = null;
+
+		if (!this.editMount) {
+			new Setting(webdavSection)
+				.setName('Quick-fill preset')
+				.setDesc('Optionally choose your service to pre-fill the Server URL field below.')
+				.addDropdown(drop => {
+					drop.addOption('', '— select a preset —');
+					drop.addOption('nextcloud', 'Nextcloud');
+					drop.addOption('owncloud',  'ownCloud');
+					drop.addOption('synology',  'Synology NAS (DSM WebDAV)');
+					drop.addOption('qnap',      'QNAP NAS');
+					drop.setValue('');
+					drop.onChange(val => {
+						const preset = WEBDAV_PRESETS[val];
+						if (!preset) return;
+						if (webdavUrlText) {
+							webdavUrlText.setValue(preset.urlTemplate);
+							this.webdavUrl = preset.urlTemplate;
+						}
+						if (!presetNoteEl) {
+							presetNoteEl = webdavSection.createEl('p', { cls: 'setting-item-description' });
+							presetNoteEl.style.marginTop = '-4px';
+							presetNoteEl.style.marginBottom = '8px';
+							presetNoteEl.style.color = 'var(--text-accent)';
+						}
+						presetNoteEl.setText('💡 ' + preset.note);
+					});
+				});
+		}
+
 		new Setting(webdavSection)
 			.setName('WebDAV server URL')
 			.setDesc('Full URL to the WebDAV endpoint, e.g. https://cloud.example.com/remote.php/dav/files/username')
 			.addText(text => {
+				webdavUrlText = text;
 				text.inputEl.style.flex = '1';
 				text.setPlaceholder('https://cloud.example.com/remote.php/dav/files/username')
 					.setValue(this.webdavUrl)
