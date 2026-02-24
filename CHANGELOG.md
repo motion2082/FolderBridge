@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-02-24
+
+### Added
+- **First-run onboarding modal** — new users see a one-time welcome modal on their first Obsidian launch after installing Folder Bridge (shown only when no mounts exist and `hasSeenOnboarding` is false). The modal explains what can be mounted (local folders, WebDAV, other vaults) and provides a direct "Add my first mount →" button. Dismissed with "I'll explore on my own." Never shown again after the first interaction.
+
 ## [1.1.4] - 2026-02-24
 
 ### Added

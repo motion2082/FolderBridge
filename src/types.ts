@@ -51,6 +51,8 @@ export interface FolderBridgeSettings {
 	 * Useful for OS noise files: .DS_Store, Thumbs.db, desktop.ini, etc.
 	 */
 	globalIgnorePatterns: string[];
+	/** Set to true after the first-run welcome modal has been shown. */
+	hasSeenOnboarding: boolean;
 }
 
 export const DEFAULT_SETTINGS: FolderBridgeSettings = {
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: FolderBridgeSettings = {
 	allowForeignMounts: false,
 	maxDataUriMB: 10,
 	globalIgnorePatterns: ['.DS_Store', 'Thumbs.db', 'desktop.ini', '.git'],
+	hasSeenOnboarding: false,
 };
 
 export interface MountStatus {

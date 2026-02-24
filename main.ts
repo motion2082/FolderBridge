@@ -5,6 +5,7 @@ import { VirtualAdapter } from './src/VirtualAdapter';
 import { SecurityManager } from './src/SecurityManager';
 import { MountManagerModal, getMountStatus, browseFolderOnDisk, VaultFolderPickerModal } from './src/ui/MountManagerModal';
 import { MountRootDeleteModal } from './src/ui/MountRootDeleteModal';
+import { WelcomeModal } from './src/ui/WelcomeModal';
 import { getPlatform, realPathToResourceUrl, tryReadAsDataUri } from './src/OSHelpers';
 import { encryptPassword, decryptPassword } from './src/CredentialStore';
 import { FileWatcher } from './src/FileWatcher';
@@ -170,6 +171,21 @@ export default class FolderBridgePlugin extends Plugin {
 			}
 			// Start background reachability checks after initial mount injection
 			this.startHealthChecks();
+
+			// Show first-run welcome modal for new users
+			if (!this.settings.hasSeenOnboarding) {
+				this.settings.hasSeenOnboarding = true;
+				await this.saveSettings();
+				new WelcomeModal(
+					this.app,
+					() => new MountManagerModal(
+						this.app,
+						this.security,
+						async (mount) => { await this.addMount(mount); },
+					).open(),
+					() => { /* dismissed */ },
+				).open();
+			}
 		});
 
 		console.log(`FolderBridge loaded (${getPlatform()}, ${this.settings.mountPoints.filter(m => m.enabled && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts)).length} active mounts on this device)`);
