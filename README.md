@@ -28,7 +28,8 @@ Extends Obsidian's single-root vault by letting you mount external folders as se
 | Windows | ✅ Tested | Full support — long paths, UNC, NTFS quirks all handled |
 | macOS | ⚠️ Untested | POSIX code paths are implemented; not yet officially tested. Community reports welcome. |
 | Linux | ✅ Tested | POSIX paths, works including WSL |
-| iOS / Android | ❌ Not supported | Obsidian's mobile sandbox prevents access to arbitrary filesystem paths |
+| Android | ⚠️ Beta | WebDAV mounts only — requires a local WebDAV server app. See [Android Setup Guide](docs/ANDROID_SETUP.md) |
+| iOS | ❌ Not supported | Not yet tested on iOS; WebDAV may work in theory |
 
 ---
 

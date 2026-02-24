@@ -207,6 +207,10 @@ export class MountManagerModal extends Modal {
 				text: '📱 On mobile, only WebDAV mounts are supported. Local filesystem and vault mounts require Obsidian Desktop.',
 				cls: 'setting-item-description',
 			});
+			contentEl.createEl('p', {
+				text: '💡 To access files on this device, install a WebDAV server app (e.g. CX File Explorer) and connect to http://localhost:PORT/',
+				cls: 'setting-item-description',
+			});
 			toggleSections('webdav');
 		} else {
 			new Setting(contentEl)
