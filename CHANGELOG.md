@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-02-25
+
+### Added
+- **Multi-select browse for ignore list** — the **Browse…** button in the per-mount ignore list now opens the OS folder picker with multi-selection enabled. Select several folders in one pass (Ctrl+click / Cmd+click) and all of them are normalised to mount-relative paths, deduplicated against the existing list, and added in a single save + vault-reload. A Notice confirms how many items were added.
+
 ## [2.1.0] - 2026-02-25
 
 ### Fixed
