@@ -1,4 +1,4 @@
-import { normalizePath } from 'obsidian';
+import { normalizePath, Notice } from 'obsidian';
 import { PathMapper } from './PathMapper';
 import { SecurityManager } from './SecurityManager';
 import { MountPoint } from './types';
@@ -50,6 +50,8 @@ export class VirtualAdapter {
 	private sftpAdapters: Map<string, SFTPAdapter> = new Map();
 	/** Max bytes for data: URI generation; configurable via plugin settings. */
 	private maxDataUriBytes: number;
+	/** Mount IDs that have already shown a read-only notice this session (one-time per mount). */
+	private readOnlyNoticedMounts: Set<string> = new Set();
 
 	constructor(
 		original: unknown,
@@ -110,6 +112,21 @@ export class VirtualAdapter {
 
 	/** Update the data: URI size cap without reloading the plugin. */
 	setMaxDataUri(bytes: number): void { this.maxDataUriBytes = bytes; }
+
+	/**
+	 * Silently swallow a write blocked by readOnly and show a one-time notice.
+	 * Called instead of throwing, so Obsidian never sees a save error and the
+	 * editor stays in a usable state.
+	 */
+	private warnReadOnly(mount: MountPoint): void {
+		if (!this.readOnlyNoticedMounts.has(mount.id)) {
+			this.readOnlyNoticedMounts.add(mount.id);
+			new Notice(
+				`Folder Bridge: "${mount.virtualPath}" is read-only — this change was not saved.`,
+				6000
+			);
+		}
+	}
 
 	// ------------------------------------------------------------------
 	// Delegation helper
@@ -216,7 +233,7 @@ export class VirtualAdapter {
 	// getName
 	// ------------------------------------------------------------------
 
-	getName(): string { return 'VirtualAdapter'; }
+	getName(): string { return this.orig().getName?.() ?? 'Vault'; }
 
 	// ------------------------------------------------------------------
 	// exists
@@ -511,7 +528,7 @@ export class VirtualAdapter {
 	async write(normalizedPath: string, data: string, options?: unknown): Promise<void> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot write to ignored path "${normalizedPath}"`);
 			const webdav = this.getWebDAV(mount);
 			if (webdav) {
@@ -552,7 +569,7 @@ export class VirtualAdapter {
 	async writeBinary(normalizedPath: string, data: ArrayBuffer, options?: unknown): Promise<void> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot write to ignored path "${normalizedPath}"`);
 			const webdav = this.getWebDAV(mount);
 			if (webdav) {
@@ -589,7 +606,7 @@ export class VirtualAdapter {
 	async append(normalizedPath: string, data: string, options?: unknown): Promise<void> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot append to ignored path "${normalizedPath}"`);
 			const webdav = this.getWebDAV(mount);
 			if (webdav) {
@@ -662,7 +679,7 @@ export class VirtualAdapter {
 	async mkdir(normalizedPath: string): Promise<void> {
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot create ignored path "${normalizedPath}"`);
 
 			const realPath = this.toReal(normalizedPath, mount);
@@ -733,7 +750,7 @@ export class VirtualAdapter {
 
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return true; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot trash ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
 			const webdavTS = this.getWebDAV(mount);
@@ -779,7 +796,7 @@ export class VirtualAdapter {
 
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot trash ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
 			const webdavTL = this.getWebDAV(mount);
@@ -817,7 +834,7 @@ export class VirtualAdapter {
 
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot remove ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
 			const webdavRD = this.getWebDAV(mount);
@@ -857,7 +874,7 @@ export class VirtualAdapter {
 
 		const mount = this.pathMapper.getMountForPath(normalizedPath);
 		if (mount) {
-			if (mount.readOnly) throw new Error(`Folder Bridge: Mount "${mount.virtualPath}" is read-only.`);
+			if (mount.readOnly) { this.warnReadOnly(mount); return; }
 			if (this.isPathIgnored(normalizedPath, mount)) throw new Error(`Folder Bridge: Cannot remove ignored path "${normalizedPath}"`);
 			const realPath = this.toReal(normalizedPath, mount);
 			const webdavRM = this.getWebDAV(mount);
@@ -911,7 +928,7 @@ export class VirtualAdapter {
 
 		if (srcMount && dstMount && srcMount.id === dstMount.id) {
 			// Rename within the same mount
-			if (srcMount.readOnly) throw new Error(`Folder Bridge: Mount "${srcMount.virtualPath}" is read-only.`);
+			if (srcMount.readOnly) { this.warnReadOnly(srcMount); return; }
 			if (this.isPathIgnored(normalizedPath, srcMount) || this.isPathIgnored(newNormalizedPath, dstMount)) {
 				throw new Error(`Folder Bridge: Cannot rename ignored paths`);
 			}
@@ -1011,9 +1028,7 @@ export class VirtualAdapter {
 			return this.orig().copy(normalizedPath, newNormalizedPath);
 		}
 
-		if (dstMount?.readOnly) {
-			throw new Error(`Folder Bridge: Mount "${dstMount.virtualPath}" is read-only.`);
-		}
+		if (dstMount?.readOnly) { this.warnReadOnly(dstMount); return; }
 
 		if ((srcMount && this.isPathIgnored(normalizedPath, srcMount)) || (dstMount && this.isPathIgnored(newNormalizedPath, dstMount))) {
 			throw new Error(`Folder Bridge: Cannot copy ignored paths`);

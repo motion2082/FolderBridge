@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-02-25
+
+### Fixed
+- **Read-only mounts no longer crash the editor** — previously, any attempt to save, rename, delete, or move a file inside a read-only mount threw an error that Obsidian couldn't handle gracefully, leaving the editor in a broken state with no way to undo or escape short of restarting. Writes are now silently swallowed (the file is never modified on disk) and a single, non-blocking notice is shown the first time each read-only mount is written to per session: _"Folder Bridge: "path" is read-only — this change was not saved."_ Subsequent write attempts on the same mount are silently dropped with no further popups.
+- **Vault name replaced by "VirtualAdapter" in the lower-left window title** — `VirtualAdapter.getName()` was hard-coded to return the string `'VirtualAdapter'`, which Obsidian uses to render the vault name display. It now delegates to the underlying adapter's `getName()` so the real vault name is shown correctly.
+
 ## [2.0.0] - 2026-02-24
 
 ### Added
