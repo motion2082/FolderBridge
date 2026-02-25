@@ -308,10 +308,10 @@ export class MountManagerModal extends Modal {
 		/* Quick-fill presets — selecting one pre-populates Server URL so users
 		 * don't have to remember the /remote.php/dav/files/USERNAME/ pattern. */
 		const WEBDAV_PRESETS: Record<string, { urlTemplate: string; note: string }> = {
-			nextcloud:  { urlTemplate: 'https://cloud.example.com/remote.php/dav/files/YOUR_USERNAME', note: 'Replace cloud.example.com and YOUR_USERNAME with your values.' },
-			owncloud:   { urlTemplate: 'https://cloud.example.com/remote.php/dav/files/YOUR_USERNAME', note: 'Replace cloud.example.com and YOUR_USERNAME with your values.' },
-			synology:   { urlTemplate: 'https://nas.example.com/webdav',  note: 'Enable WebDAV in Synology Control Panel → File Services → WebDAV.' },
-			qnap:       { urlTemplate: 'https://nas.example.com:8080/webdav', note: 'Enable WebDAV in QNAP Control Panel → Web Server → WebDAV Server.' },
+			nextcloud: { urlTemplate: 'https://cloud.example.com/remote.php/dav/files/YOUR_USERNAME', note: 'Replace cloud.example.com and YOUR_USERNAME with your values.' },
+			owncloud: { urlTemplate: 'https://cloud.example.com/remote.php/dav/files/YOUR_USERNAME', note: 'Replace cloud.example.com and YOUR_USERNAME with your values.' },
+			synology: { urlTemplate: 'https://nas.example.com/webdav', note: 'Enable WebDAV in Synology Control Panel → File Services → WebDAV.' },
+			qnap: { urlTemplate: 'https://nas.example.com:8080/webdav', note: 'Enable WebDAV in QNAP Control Panel → Web Server → WebDAV Server.' },
 		};
 
 		let presetNoteEl: HTMLParagraphElement | null = null;
@@ -324,9 +324,9 @@ export class MountManagerModal extends Modal {
 				.addDropdown(drop => {
 					drop.addOption('', '— select a preset —');
 					drop.addOption('nextcloud', 'Nextcloud');
-					drop.addOption('owncloud',  'ownCloud');
-					drop.addOption('synology',  'Synology NAS (DSM WebDAV)');
-					drop.addOption('qnap',      'QNAP NAS');
+					drop.addOption('owncloud', 'ownCloud');
+					drop.addOption('synology', 'Synology NAS (DSM WebDAV)');
+					drop.addOption('qnap', 'QNAP NAS');
 					drop.setValue('');
 					drop.onChange(val => {
 						const preset = WEBDAV_PRESETS[val];
