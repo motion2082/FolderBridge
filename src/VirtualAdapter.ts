@@ -245,6 +245,35 @@ export class VirtualAdapter {
 	getName(): string { return this.orig().getName?.() ?? 'Vault'; }
 
 	// ------------------------------------------------------------------
+	// getFullPath
+	// ------------------------------------------------------------------
+
+	/**
+	 * Returns the absolute OS path for a vault-relative path.
+	 *
+	 * Obsidian's `vault.create()` / `vault.createBinary()` call
+	 * `adapter.getFullPath()` internally to resolve parent-directory checks and
+	 * post-write verification against the local filesystem.  Without this
+	 * override the Proxy would delegate to the original FileSystemAdapter, which
+	 * returns `{vaultDir}/{virtualPath}` — a path that does not exist on disk for
+	 * virtual mount files (whose real location is the mounted source directory).
+	 * The resulting existence check fails silently, so vault.create() returns
+	 * null and Obsidian opens an empty tab with no note.
+	 *
+	 * For local mounts we return the real mounted OS path.
+	 * For cloud mounts (WebDAV / S3 / SFTP) there is no local path; we
+	 * delegate to the original adapter so callers get the vault-relative path
+	 * they already had (cloud files are not accessed via the local filesystem).
+	 */
+	getFullPath(normalizedPath: string): string {
+		const mount = this.pathMapper.getMountForPath(normalizedPath);
+		if (mount && !VirtualAdapter.isCloudMount(mount)) {
+			return this.pathMapper.toRealPath(normalizedPath, mount);
+		}
+		return this.orig().getFullPath?.(normalizedPath) ?? normalizedPath;
+	}
+
+	// ------------------------------------------------------------------
 	// exists
 	// ------------------------------------------------------------------
 

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-02-26
+
+### Fixed
+- **New note in virtual folder** — pressing **Cmd/Ctrl+N** with a virtual mount folder set as the default note location now correctly creates the note. Previously, Obsidian opened an empty tab but never wrote the file. Root cause: `vault.create()` calls `adapter.getFullPath()` internally to verify parent-directory existence; without an override, the Proxy delegated to the original `FileSystemAdapter`, which returned the vault's physical-directory path instead of the real mounted path — a path that does not exist on disk. `VirtualAdapter` now implements `getFullPath()` to return the correct real OS path for local mounts. A defence-in-depth patch on `vault.create()` / `vault.createBinary()` also ensures the new `TFile` is registered in Obsidian's vault registry immediately if the native file-system watcher (which only watches the vault directory) does not fire.
+
 ## [2.3.0] - 2026-02-25
 
 ### Added

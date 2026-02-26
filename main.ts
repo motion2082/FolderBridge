@@ -44,6 +44,9 @@ export default class FolderBridgePlugin extends Plugin {
 	private originalAdapter: unknown = null;
 	// Preserve original vault.getResourcePath so we can restore it on unload
 	private originalVaultGetResourcePath: unknown = null;
+	// Preserve original vault.create / vault.createBinary so we can restore on unload
+	private originalVaultCreate: unknown = null;
+	private originalVaultCreateBinary: unknown = null;
 	statusBarItem: HTMLElement | null = null;
 
 	/** Tracks reachability per mount.id; populated by the 30-second health-check loop. */
@@ -374,6 +377,18 @@ export default class FolderBridgePlugin extends Plugin {
 			(this.app.vault as any).getResourcePath = this.originalVaultGetResourcePath;
 			this.originalVaultGetResourcePath = null;
 		}
+
+		// Restore the original vault.create / vault.createBinary
+		if (this.originalVaultCreate) {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			(this.app.vault as any).create = this.originalVaultCreate;
+			this.originalVaultCreate = null;
+		}
+		if (this.originalVaultCreateBinary) {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			(this.app.vault as any).createBinary = this.originalVaultCreateBinary;
+			this.originalVaultCreateBinary = null;
+		}
 		console.log('FolderBridge unloaded');
 	}
 
@@ -560,6 +575,92 @@ export default class FolderBridgePlugin extends Plugin {
 				return (this.originalVaultGetResourcePath as any)(file);
 			}
 			return '';
+		};
+
+		// Patch vault.create() and vault.createBinary() for virtual mount paths.
+		//
+		// Obsidian's internal vault.create() calls adapter.getFullPath() to verify
+		// that the parent directory exists on the local filesystem before — and after
+		// — writing.  For virtual mount files the real data lives in the mounted
+		// source directory, not inside the vault's physical folder.  Even with
+		// getFullPath() correctly overridden on the adapter, Obsidian may not call
+		// vault.onChange('file-created', …) synchronously for virtual paths (it
+		// relies on the native filesystem watcher, which only watches the vault dir).
+		//
+		// This patch ensures that, for any path belonging to a virtual mount:
+		// 1. The original vault.create() runs normally (it writes via our adapter).
+		// 2. If the TFile is not in the vault's fileMap after that call, we perform
+		//    a manual write + immediate vault.onChange('file-created', …) so the TFile
+		//    is present and a newly-opened tab immediately shows the new note.
+		this.originalVaultCreate = vault.create?.bind(vault);
+		this.originalVaultCreateBinary = vault.createBinary?.bind(vault);
+		const plugin = this;
+
+		vault.create = async function (path: string, data: string, options?: unknown): Promise<TFile | null> {
+			const nPath = normalizePath(path);
+			if (!plugin.pathMapper.getMountForPath(nPath)) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				return (plugin.originalVaultCreate as any)(path, data, options);
+			}
+
+			// Let the original vault.create() run — it calls adapter.write() and may
+			// call vault.onChange('file-created', …) depending on the Obsidian version.
+			try {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				await (plugin.originalVaultCreate as any)(path, data, options);
+			} catch (e) {
+				// Original vault.create() might reject due to a failed filesystem check
+				// against the vault physical directory (the real file is in the mount).
+				// We swallow the error and fall through to manual registration.
+				console.debug('[FolderBridge] vault.create() rejected for virtual path, using manual registration:', e);
+			}
+
+			// If the original call already registered the TFile, return it.
+			const existing = plugin.app.vault.getAbstractFileByPath(nPath) as TFile | null;
+			if (existing) return existing;
+
+			// Manual fallback: write the file + register the TFile immediately.
+			// This runs when vault.create() failed or when Obsidian relies on the
+			// native FS watcher (which never fires for paths outside the vault dir).
+			try {
+				await vault.adapter.write(nPath, data, options);
+			} catch {
+				// File may already have been written by the failed vault.create() above.
+			}
+			const stat = await vault.adapter.stat(nPath);
+			if (stat && typeof vault.onChange === 'function' && !plugin.app.vault.getAbstractFileByPath(nPath)) {
+				await vault.onChange('file-created', nPath, null, stat);
+			}
+			return plugin.app.vault.getAbstractFileByPath(nPath) as TFile ?? null;
+		};
+
+		vault.createBinary = async function (path: string, data: ArrayBuffer, options?: unknown): Promise<TFile | null> {
+			const nPath = normalizePath(path);
+			if (!plugin.pathMapper.getMountForPath(nPath)) {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				return (plugin.originalVaultCreateBinary as any)(path, data, options);
+			}
+
+			try {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				await (plugin.originalVaultCreateBinary as any)(path, data, options);
+			} catch (e) {
+				console.debug('[FolderBridge] vault.createBinary() rejected for virtual path, using manual registration:', e);
+			}
+
+			const existing = plugin.app.vault.getAbstractFileByPath(nPath) as TFile | null;
+			if (existing) return existing;
+
+			try {
+				await vault.adapter.writeBinary(nPath, data, options);
+			} catch {
+				// File may already have been written by the failed vault.createBinary().
+			}
+			const stat = await vault.adapter.stat(nPath);
+			if (stat && typeof vault.onChange === 'function' && !plugin.app.vault.getAbstractFileByPath(nPath)) {
+				await vault.onChange('file-created', nPath, null, stat);
+			}
+			return plugin.app.vault.getAbstractFileByPath(nPath) as TFile ?? null;
 		};
 	}
 
