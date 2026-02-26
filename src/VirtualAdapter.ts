@@ -114,6 +114,15 @@ export class VirtualAdapter {
 	setMaxDataUri(bytes: number): void { this.maxDataUriBytes = bytes; }
 
 	/**
+	 * Clear the one-shot read-only notice record for a mount.
+	 * Call this whenever the mount's readOnly flag is changed so the Notice
+	 * fires again if needed after the next toggle.
+	 */
+	clearReadOnlyNotice(mountId: string): void {
+		this.readOnlyNoticedMounts.delete(mountId);
+	}
+
+	/**
 	 * Silently swallow a write blocked by readOnly and show a one-time notice.
 	 * Called instead of throwing, so Obsidian never sees a save error and the
 	 * editor stays in a usable state.

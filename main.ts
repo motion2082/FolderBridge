@@ -176,6 +176,54 @@ export default class FolderBridgePlugin extends Plugin {
 			},
 		});
 
+		// Command: toggle read-only on ALL mounts belonging to this device
+		this.addCommand({
+			id: 'toggle-readonly-all',
+			name: 'Toggle read-only on all mounts',
+			callback: async () => {
+				const myMounts = this.settings.mountPoints.filter(m => m.deviceId === this.settings.deviceId);
+				if (myMounts.length === 0) {
+					new Notice('Folder Bridge: No mounts configured.');
+					return;
+				}
+				// If any mount is currently writable, make all read-only; otherwise unlock all.
+				const anyWritable = myMounts.some(m => !m.readOnly);
+				for (const m of myMounts) {
+					await this.setMountReadOnly(m.id, anyWritable, /* skipNotice */ true);
+				}
+				new Notice(`Folder Bridge: All mounts are now ${anyWritable ? 'read-only 🔒' : 'writable 🔓'}.`);
+			},
+		});
+
+		// Command: toggle read-only on a specific mount (fuzzy picker)
+		this.addCommand({
+			id: 'toggle-readonly-mount',
+			name: 'Toggle read-only on a specific mount…',
+			callback: () => {
+				const myMounts = this.settings.mountPoints.filter(
+					m => m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts,
+				);
+				if (myMounts.length === 0) {
+					new Notice('Folder Bridge: No mounts configured.');
+					return;
+				}
+				// eslint-disable-next-line @typescript-eslint/no-this-alias
+				const plugin = this;
+				const modal = new (class extends FuzzySuggestModal<MountPoint> {
+					getItems() { return myMounts; }
+					getItemText(m: MountPoint) {
+						const state = m.readOnly ? '🔒 read-only' : '🔓 writable';
+						return `${state}  ${m.label || m.virtualPath}`;
+					}
+					async onChooseItem(m: MountPoint) {
+						await plugin.setMountReadOnly(m.id, !m.readOnly);
+					}
+				})(this.app);
+				modal.setPlaceholder('Choose a mount to toggle read-only');
+				modal.open();
+			},
+		});
+
 		// Add context menu item to ignore files/folders
 		this.registerEvent(
 			this.app.workspace.on('file-menu', (menu, file) => {
@@ -688,6 +736,22 @@ export default class FolderBridgePlugin extends Plugin {
 	 * Update an existing mount in-place.  Handles vault-tree re-injection when
 	 * the virtual path or real path changes, and keeps the allowlist in sync.
 	 */
+	/**
+	 * Flip the read-only flag for a single mount, clear its one-shot notice
+	 * record, persist settings, and show a confirmation Notice.
+	 * @param skipNotice  Pass true when batch-toggling all mounts (caller shows a single summary Notice).
+	 */
+	async setMountReadOnly(id: string, readOnly: boolean, skipNotice = false): Promise<void> {
+		const mount = this.settings.mountPoints.find(m => m.id === id);
+		if (!mount) return;
+		mount.readOnly = readOnly;
+		this.virtualAdapter?.clearReadOnlyNotice(id);
+		await this.saveSettings();
+		if (!skipNotice) {
+			new Notice(`Folder Bridge: “${mount.label || mount.virtualPath}” is now ${readOnly ? 'read-only 🔒' : 'writable 🔓'}.`);
+		}
+	}
+
 	async updateMount(id: string, newData: Omit<MountPoint, 'id'>): Promise<void> {
 		const idx = this.settings.mountPoints.findIndex(m => m.id === id);
 		if (idx === -1) return;
@@ -1757,6 +1821,19 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 					toggle.toggleEl.classList.add('is-disabled');
 					toggle.toggleEl.style.opacity = '0.5';
 					toggle.toggleEl.style.cursor = 'not-allowed';
+				}
+			})
+			.addExtraButton(btn => {
+				// Read-only lock icon — click to toggle; always visible so state is obvious at a glance
+				btn
+					.setIcon(mount.readOnly ? 'lock' : 'unlock')
+					.setTooltip(mount.readOnly ? 'Read-only — click to allow writes' : 'Writable — click to make read-only')
+					.onClick(async () => {
+						await this.plugin.setMountReadOnly(mount.id, !mount.readOnly);
+						this.display();
+					});
+				if (mount.readOnly) {
+					btn.extraSettingsEl.style.color = 'var(--text-warning)';
 				}
 			});
 

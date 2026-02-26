@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Read-only toggle on each mount row** — a lock/unlock icon button sits next to the enabled toggle on every mount in Settings. Click it to flip read-only on or off instantly, with a confirmation Notice. The icon is amber when locked, normal when writable.
+- **Command: Toggle read-only on all mounts** — flips every mount on this device in one action. If any mount is currently writable all go read-only; if all are already read-only all become writable. Assignable to a hotkey in Settings → Hotkeys.
+- **Command: Toggle read-only on a specific mount…** — opens a fuzzy-search picker (same UX as the existing toggle on/off command) showing each mount's current lock state. Pick one to flip it. Assignable to a hotkey.
+
 ## [2.2.0] - 2026-02-25
 
 ### Added
