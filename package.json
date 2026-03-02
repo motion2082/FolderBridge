@@ -1,41 +1,41 @@
 {
-	"name": "folderbridge",
-	"version": "2.4.3",
-	"description": "Adds external folders to your vault as seamless, native-feeling directories. Creates virtual mount points that map real filesystem paths into the vault.",
-	"main": "main.js",
-	"scripts": {
-		"dev": "node esbuild.config.mjs",
-		"build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
-		"test": "vitest run",
-		"version": "node version-bump.mjs && git add manifest.json versions.json"
-	},
-	"keywords": [
-		"obsidian",
-		"plugin",
-		"virtual-filesystem",
-		"folder-bridge"
-	],
-	"author": "tescolopio",
-	"license": "MIT",
-	"devDependencies": {
-		"@esbuild/linux-x64": "^0.27.3",
-		"@types/node": "^20.11.16",
-		"@types/ssh2": "^1.15.4",
-		"@typescript-eslint/eslint-plugin": "^8.56.0",
-		"@typescript-eslint/parser": "^8.56.0",
-		"builtin-modules": "^3.3.0",
-		"esbuild": "0.27.3",
-		"eslint": "^10.0.1",
-		"obsidian": "^1.12.0",
-		"tslib": "2.6.2",
-		"typescript": "5.3.3",
-		"typescript-eslint": "^8.56.0",
-		"vitest": "^4.0.18"
-	},
-	"dependencies": {
-		"@aws-sdk/client-s3": "^3.750.0",
-		"chokidar": "^5.0.0",
-		"ssh2-sftp-client": "^11.0.0",
-		"webdav": "^5.9.0"
-	}
+    "name": "folderbridge",
+    "version": "2.4.3",
+    "description": "Adds external folders to your vault as seamless, native-feeling directories. Creates virtual mount points that map real filesystem paths into the vault.",
+    "main": "main.js",
+    "scripts": {
+        "dev": "node esbuild.config.mjs",
+        "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+        "test": "vitest run",
+        "version": "node version-bump.mjs && git add manifest.json versions.json"
+    },
+    "keywords": [
+        "obsidian",
+        "plugin",
+        "virtual-filesystem",
+        "folder-bridge"
+    ],
+    "author": "tescolopio",
+    "license": "MIT",
+    "devDependencies": {
+        "@esbuild/linux-x64": "^0.27.3",
+        "@types/node": "^20.11.16",
+        "@types/ssh2": "^1.15.4",
+        "@typescript-eslint/eslint-plugin": "^8.56.0",
+        "@typescript-eslint/parser": "^8.56.0",
+        "builtin-modules": "^3.3.0",
+        "esbuild": "0.27.3",
+        "eslint": "^10.0.1",
+        "obsidian": "^1.12.0",
+        "tslib": "2.6.2",
+        "typescript": "5.3.3",
+        "typescript-eslint": "^8.56.0",
+        "vitest": "^4.0.18"
+    },
+    "dependencies": {
+        "@aws-sdk/client-s3": "^3.750.0",
+        "chokidar": "^5.0.0",
+        "ssh2-sftp-client": "^11.0.0",
+        "webdav": "^5.9.0"
+    }
 }
