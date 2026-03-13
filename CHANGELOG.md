@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-03-13
+
+### Fixed
+- **Community-plugin reviewer compatibility follow-up** — moved the optional bundled module shim behind a build-time esbuild plugin so the tracked TypeScript source no longer contains live `require(...)` branches while the production bundle still includes `chokidar`, `@aws-sdk/client-s3`, and `ssh2-sftp-client` for desktop builds.
+- **Promise-returning modal callbacks are now explicitly handled** — the vault folder picker and mount-root delete modal now wrap promise-capable callbacks in fire-and-forget handlers with logging, matching Obsidian's `void` callback expectations and avoiding reviewer-bot promise warnings.
+- **Transport adapter type cleanup** — WebDAV stat handling now supports the current `webdav` client response union without unsafe narrowing, and SFTP readiness / disconnect code no longer relies on unnecessary wrappers or assertions.
+
 ## [2.9.0] - 2026-03-13
 
 ### Added

@@ -1,36 +1,18 @@
-type WindowWithNodeRequire = Window & { require?: NodeRequire };
+import { loadBundledOptionalModule } from './optionalNodeModules';
 
-function loadBundledOptionalModule<T>(moduleId: string): T | null {
-    try {
-        switch (moduleId) {
-            case 'chokidar':
-                if (typeof require === 'function') return require('chokidar') as T;
-                break;
-            case '@aws-sdk/client-s3':
-                if (typeof require === 'function') return require('@aws-sdk/client-s3') as T;
-                break;
-            case 'ssh2-sftp-client':
-                if (typeof require === 'function') return require('ssh2-sftp-client') as T;
-                break;
-        }
-    } catch {
-        return null;
-    }
-
-    return null;
-}
+type WindowWithRuntimeRequire = Window & { require?: NodeJS.Require };
 
 /**
- * Resolve the host's CommonJS loader without using eval/new Function.
+ * Resolve the host's CommonJS loader without using eval or generated functions.
  * Desktop Obsidian exposes `require`; mobile does not.
  */
-export function getRuntimeRequire(): NodeRequire | undefined {
+export function getRuntimeRequire(): NodeJS.Require | undefined {
     if (typeof require === 'function') {
         return require;
     }
 
     if (typeof window !== 'undefined') {
-        const windowWithRequire = window as WindowWithNodeRequire;
+        const windowWithRequire = window as WindowWithRuntimeRequire;
         if (windowWithRequire.require) {
             return windowWithRequire.require;
         }

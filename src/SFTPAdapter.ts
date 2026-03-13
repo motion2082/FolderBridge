@@ -189,18 +189,14 @@ export class SFTPAdapter {
     }
 
     private isSFTPReady(): boolean {
-        try {
-            return this.sftp?.sftp != null || typeof this.sftp?.list === 'function';
-        } catch {
-            return false;
-        }
+        return this.sftp?.sftp != null || typeof this.sftp?.list === 'function';
     }
 
     /** Close the SFTP connection. Called on unmount. */
     async disconnect(): Promise<void> {
         if (this.sftp) {
             try {
-                await this.sftp!.end();
+                await this.sftp.end();
             } catch { /* ignore */ }
             this.sftp = null;
         }
@@ -212,7 +208,7 @@ export class SFTPAdapter {
             await this.connect();
             return null;
         } catch (e) {
-            return String((e as Error).message ?? e);
+            return e instanceof Error ? e.message : String(e);
         }
     }
 

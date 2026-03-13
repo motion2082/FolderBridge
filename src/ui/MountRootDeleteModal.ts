@@ -1,4 +1,5 @@
 import { App, Modal, Setting } from 'obsidian';
+import { logger } from '../logger';
 
 export class MountRootDeleteModal extends Modal {
     private resolve: (value: 'unmount' | 'delete' | 'unmount-always' | 'delete-always' | 'cancel') => void | Promise<void>;
@@ -8,6 +9,12 @@ export class MountRootDeleteModal extends Modal {
     constructor(app: App, private mountPath: string, resolve: (value: 'unmount' | 'delete' | 'unmount-always' | 'delete-always' | 'cancel') => void | Promise<void>) {
         super(app);
         this.resolve = resolve;
+    }
+
+    private settle(value: 'unmount' | 'delete' | 'unmount-always' | 'delete-always' | 'cancel'): void {
+        void Promise.resolve(this.resolve(value)).catch(error => {
+            logger.error('Folder Bridge: Mount root delete callback failed', error);
+        });
     }
 
     onOpen() {
@@ -38,7 +45,7 @@ export class MountRootDeleteModal extends Modal {
         btnCancel.onclick = () => {
             if (!this.resolved) {
                 this.resolved = true;
-                this.resolve('cancel');
+                this.settle('cancel');
                 this.close();
             }
         };
@@ -47,7 +54,7 @@ export class MountRootDeleteModal extends Modal {
         btnUnmount.onclick = () => {
             if (!this.resolved) {
                 this.resolved = true;
-                this.resolve(this.dontAskAgain ? 'unmount-always' : 'unmount');
+                this.settle(this.dontAskAgain ? 'unmount-always' : 'unmount');
                 this.close();
             }
         };
@@ -56,7 +63,7 @@ export class MountRootDeleteModal extends Modal {
         btnDelete.onclick = () => {
             if (!this.resolved) {
                 this.resolved = true;
-                this.resolve(this.dontAskAgain ? 'delete-always' : 'delete');
+                this.settle(this.dontAskAgain ? 'delete-always' : 'delete');
                 this.close();
             }
         };
@@ -67,7 +74,7 @@ export class MountRootDeleteModal extends Modal {
         contentEl.empty();
         if (!this.resolved) {
             this.resolved = true;
-            this.resolve('cancel');
+            this.settle('cancel');
         }
     }
 }

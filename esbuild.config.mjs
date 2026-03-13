@@ -44,6 +44,44 @@ module.exports = new Proxy({}, {
 	},
 };
 
+const optionalNodeModulesPlugin = {
+	name: 'optional-node-modules',
+	setup(build) {
+		build.onResolve({ filter: /^\.\/optionalNodeModules$/ }, args => {
+			if (!args.importer.endsWith('/src/runtimeNode.ts')) {
+				return null;
+			}
+
+			return {
+				path: 'folderbridge-optional-node-modules',
+				namespace: 'folderbridge-optional-node-modules',
+			};
+		});
+
+		build.onLoad({ filter: /.*/, namespace: 'folderbridge-optional-node-modules' }, () => ({
+			contents: `
+export function loadBundledOptionalModule(moduleId) {
+	try {
+		switch (moduleId) {
+			case 'chokidar':
+				return require('chokidar');
+			case '@aws-sdk/client-s3':
+				return require('@aws-sdk/client-s3');
+			case 'ssh2-sftp-client':
+				return require('ssh2-sftp-client');
+			default:
+				return null;
+		}
+	} catch {
+		return null;
+	}
+}
+`,
+			loader: 'js',
+		}));
+	},
+};
+
 const context = await esbuild.context({
 	banner: {
 		js: banner,
@@ -65,8 +103,9 @@ const context = await esbuild.context({
 		'@lezer/common',
 		'@lezer/highlight',
 		'@lezer/lr',
-		...builtins],
-	plugins: [nativeNodeModulesPlugin],
+		...builtins
+	],
+	plugins: [nativeNodeModulesPlugin, optionalNodeModulesPlugin],
 	format: 'cjs',
 	target: 'es2018',
 	logLevel: "info",

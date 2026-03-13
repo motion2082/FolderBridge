@@ -140,7 +140,9 @@ export class VaultFolderPickerModal extends SuggestModal<string> {
 	}
 
 	onChooseSuggestion(item: string): void {
-		this.onChoose(item === '(vault root)' ? '' : item);
+		void Promise.resolve(this.onChoose(item === '(vault root)' ? '' : item)).catch(error => {
+			logger.error('Folder Bridge: Vault folder picker callback failed', error);
+		});
 	}
 }
 

@@ -91,12 +91,13 @@ export class WebDAVAdapter {
 
     async stat(serverPath: string): Promise<{ type: 'file' | 'folder'; ctime: number; mtime: number; size: number } | null> {
         try {
-            const info = await this.client.stat(this.toServerPath(serverPath)) as FileStat;
+            const info = await this.client.stat(this.toServerPath(serverPath));
+            const stat = 'data' in info ? info.data : info;
             return {
-                type: info.type === 'directory' ? 'folder' : 'file',
-                ctime: info.lastmod ? new Date(info.lastmod).getTime() : 0,
-                mtime: info.lastmod ? new Date(info.lastmod).getTime() : 0,
-                size: info.size ?? 0,
+                type: stat.type === 'directory' ? 'folder' : 'file',
+                ctime: stat.lastmod ? new Date(stat.lastmod).getTime() : 0,
+                mtime: stat.lastmod ? new Date(stat.lastmod).getTime() : 0,
+                size: stat.size ?? 0,
             };
         } catch {
             return null;
@@ -111,7 +112,7 @@ export class WebDAVAdapter {
         const files: string[] = [];
         const folders: string[] = [];
         try {
-            const contents = await this.client.getDirectoryContents(this.toServerPath(serverPath)) as FileStat[];
+            const contents: FileStat[] = await this.client.getDirectoryContents(this.toServerPath(serverPath));
             for (const item of contents) {
                 // Extract filename without requiring the `path` Node module so
                 // this works on Obsidian Mobile (WebDAV paths always use '/').
