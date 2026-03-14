@@ -40,15 +40,15 @@ function normalizeVirtualPath(input: string): string {
         .join('/');
 }
 
-function cleanObject<T extends Record<string, unknown>>(value: T): T {
+function cleanObject<T extends object>(value: T): T {
     return Object.fromEntries(
-        Object.entries(value).filter(([, entry]) => entry !== undefined)
+        Object.entries(value as Record<string, unknown>).filter(([, entry]) => entry !== undefined)
     ) as T;
 }
 
 export function serializeMountToTocEntry(mount: MountPoint): TocFileMount {
     const mountType: TocFileMount['mountType'] = mount.mountType === 'vault' ? 'vault' : 'local';
-    return cleanObject({
+    const entry: TocFileMount = {
         id: mount.id,
         deviceId: mount.deviceId,
         virtualPath: normalizeVirtualPath(mount.virtualPath),
@@ -66,7 +66,8 @@ export function serializeMountToTocEntry(mount: MountPoint): TocFileMount {
         watcherSuppressAllEvents: mount.watcherSuppressAllEvents,
         maxFiles: mount.maxFiles,
         deviceOverrides: mount.deviceOverrides,
-    });
+    };
+    return cleanObject(entry);
 }
 
 export function serializeTocConfig(mounts: MountPoint[]): string {

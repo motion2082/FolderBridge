@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-03-14
+
+### Fixed
+- **Mounted note deletes now stay in sync with Obsidian immediately** — when a file or folder is deleted through a mounted path, Folder Bridge now explicitly signals the vault tree removal instead of relying only on the external watcher. This prevents stale explorer entries and follow-up `ENOENT` reads against notes that were already removed on disk.
+
 ## [2.11.0] - 2026-03-13
 
 ### Added

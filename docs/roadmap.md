@@ -2,7 +2,7 @@
 
 This document tracks the current status of platform support and planned features. It is updated with each release.
 
-**Current version: v2.11.0** — Last updated: 2026-03-13
+**Current version: v2.12.0** — Last updated: 2026-03-14
 
 ---
 
@@ -22,6 +22,7 @@ This document tracks the current status of platform support and planned features
 
 | Version | What shipped |
 |---------|-------------|
+| v2.12.0 | **Mounted delete sync fix** — deletes initiated through mounted paths now trigger immediate vault removal notifications, so Obsidian no longer keeps stale explorer entries or tries to re-read notes that were already deleted on disk. |
 | v2.11.0 | **Managed TOC workflow for UI mounts** — local and vault mounts created in Settings can now be stored in one writable JSON TOC file while additional external TOC files remain read-only and authoritative. **Guided setup** — the Settings tab now suggests a default managed TOC path and can create/bind/migrate existing UI mounts in one step. |
 | v2.10.0 | **Community-plugin reviewer compatibility follow-up** — optional bundled desktop modules are now injected at build time rather than exposed through reviewer-sensitive runtime-loader source patterns. Promise-capable modal callbacks now use explicit fire-and-forget wrappers with logging. WebDAV/SFTP typing cleanup landed with the reviewer pass. |
 | v2.9.0 | **Per-mount visible file-type filter** — mounts can now expose all files, Markdown only, or PDF only. **Android / BRAT load fix** — mobile-safe runtime loading and correct desktop dependency bundling. **Desktop watcher regression fix** — optional modules such as `chokidar` are bundled again correctly. **Suppressed watcher restart fix** — startup replay now respects watcher suppression state. |

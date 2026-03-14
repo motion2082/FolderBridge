@@ -1010,6 +1010,19 @@ export default class FolderBridgePlugin extends Plugin {
 				} catch {
 					// Best-effort: stat may fail transiently (e.g. cloud mount); ignore.
 				}
+			},
+			// onDelete: fired after a mounted path is deleted via the adapter.
+			//
+			// When a delete originates inside Obsidian, the external watcher may not
+			// fire at all (watcher backend unavailable, network-drive watcher gaps,
+			// or runtime suppression). Explicitly signaling the removal here keeps the
+			// vault tree and any open file state in sync with the real filesystem.
+			async (normalizedPath: string) => {
+				const vault = this.app.vault as typeof this.app.vault & VaultInternal;
+				if (typeof vault.onChange !== 'function') return;
+				const existing = this.app.vault.getAbstractFileByPath(normalizedPath);
+				if (!existing) return;
+				await vault.onChange(existing instanceof TFolder ? 'folder-removed' : 'file-removed', normalizedPath, null, null);
 			}
 		);
 

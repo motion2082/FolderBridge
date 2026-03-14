@@ -69,6 +69,12 @@ export class VirtualAdapter {
 	 * (with usePolling:false) also misses the write.
 	 */
 	private onModify?: (normalizedPath: string) => Promise<void>;
+	/**
+	 * Called after a mounted file or folder is successfully deleted so Obsidian
+	 * can immediately remove it from the in-memory vault tree even when the
+	 * external watcher backend is unavailable or suppressed.
+	 */
+	private onDelete?: (normalizedPath: string) => Promise<void>;
 
 	constructor(
 		original: unknown,
@@ -79,7 +85,8 @@ export class VirtualAdapter {
 		onMountRootDelete: (mount: MountPoint) => Promise<'unmount' | 'delete' | 'cancel'>,
 		onMountRootMove: (mount: MountPoint, newVirtualPath: string) => Promise<void>,
 		isIgnored: (name: string, mount: MountPoint, mountRelativePath?: string) => boolean,
-		onModify?: (normalizedPath: string) => Promise<void>
+		onModify?: (normalizedPath: string) => Promise<void>,
+		onDelete?: (normalizedPath: string) => Promise<void>
 	) {
 		this.original = original;
 		this.pathMapper = pathMapper;
@@ -90,6 +97,15 @@ export class VirtualAdapter {
 		this.onMountRootMove = onMountRootMove;
 		this.isIgnored = isIgnored;
 		this.onModify = onModify;
+		this.onDelete = onDelete;
+	}
+
+	private async notifyDelete(normalizedPath: string): Promise<void> {
+		try {
+			await this.onDelete?.(normalizedPath);
+		} catch {
+			// Best-effort only: the delete already succeeded on the backend.
+		}
 	}
 
 	/** Register the FileServer instance so getResourcePath can use it for video/audio. */
@@ -904,18 +920,21 @@ export class VirtualAdapter {
 			if (webdavTS) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] trashSystem (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return true; }
 				await webdavTS.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return true;
 			}
 			const s3TS = this.getS3(mount);
 			if (s3TS) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] trashSystem (s3) → ${this.toServerPath(normalizedPath, mount)}`); return true; }
 				await s3TS.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return true;
 			}
 			const sftpTS = this.getSFTP(mount);
 			if (sftpTS) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] trashSystem (sftp) → ${this.toServerPath(normalizedPath, mount)}`); return true; }
 				await sftpTS.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return true;
 			}
 			this.assertAllowed(realPath);
@@ -924,10 +943,12 @@ export class VirtualAdapter {
 				const electron = loadOptionalNodeModule<{ shell?: { trashItem(p: string): Promise<string> } }>('electron');
 				const shell = electron?.shell;
 				await shell?.trashItem(realPath);
+				await this.notifyDelete(normalizedPath);
 				return true;
 			} catch {
 				// Fallback: permanent delete
 				await fs.promises.rm(realPath, { recursive: true, force: true });
+				await this.notifyDelete(normalizedPath);
 				return true;
 			}
 		}
@@ -950,23 +971,27 @@ export class VirtualAdapter {
 			if (webdavTL) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] trashLocal (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await webdavTL.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			const s3TL = this.getS3(mount);
 			if (s3TL) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] trashLocal (s3) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await s3TL.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			const sftpTL = this.getSFTP(mount);
 			if (sftpTL) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] trashLocal (sftp) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await sftpTL.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			this.assertAllowed(realPath);
 			if (this.dryRun) { logger.debug(`[FolderBridge DryRun] trashLocal → ${realPath}`); return; }
 			await fs.promises.rm(realPath, { recursive: true, force: true });
+			await this.notifyDelete(normalizedPath);
 			return;
 		}
 		return (this.orig().trashLocal as (path: string, system?: boolean) => Promise<void>)(normalizedPath, system);
@@ -988,23 +1013,27 @@ export class VirtualAdapter {
 			if (webdavRD) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] rmdir (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await webdavRD.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			const s3RD = this.getS3(mount);
 			if (s3RD) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] rmdir (s3) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await s3RD.removePrefix(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			const sftpRD = this.getSFTP(mount);
 			if (sftpRD) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] rmdir (sftp) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await sftpRD.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			this.assertAllowed(realPath);
 			if (this.dryRun) { logger.debug(`[FolderBridge DryRun] rmdir → ${realPath}`); return; }
 			await fs.promises.rm(realPath, { recursive: true, force: true });
+			await this.notifyDelete(normalizedPath);
 			return;
 		}
 		if (typeof this.orig().rmdir === 'function') {
@@ -1028,23 +1057,27 @@ export class VirtualAdapter {
 			if (webdavRM) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] remove (webdav) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await webdavRM.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			const s3RM = this.getS3(mount);
 			if (s3RM) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] remove (s3) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await s3RM.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			const sftpRM = this.getSFTP(mount);
 			if (sftpRM) {
 				if (this.dryRun) { logger.debug(`[FolderBridge DryRun] remove (sftp) → ${this.toServerPath(normalizedPath, mount)}`); return; }
 				await sftpRM.remove(this.toServerPath(normalizedPath, mount));
+				await this.notifyDelete(normalizedPath);
 				return;
 			}
 			this.assertAllowed(realPath);
 			if (this.dryRun) { logger.debug(`[FolderBridge DryRun] remove → ${realPath}`); return; }
 			await fs.promises.rm(realPath, { recursive: true, force: true });
+			await this.notifyDelete(normalizedPath);
 			return;
 		}
 		if (typeof this.orig().remove === 'function') {
