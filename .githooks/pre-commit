@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -e
+
+echo "Running UI copy style check..."
+npm run check:ui-text

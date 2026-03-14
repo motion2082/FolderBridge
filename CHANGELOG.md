@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-03-14
+
+### Added
+- **Local UI copy validation for community-plugin review** — added a repo-local `npm run check:ui-text` script plus optional `.githooks/pre-commit` hook to catch reviewer-facing UI copy issues before commit. The checker scans common Obsidian UI call-sites for sentence-case regressions, `Folder Bridge` branding mismatches, and decorative status labels.
+
+### Changed
+- **Reviewer-facing UI text pass across commands, notices, and onboarding** — normalized `Folder Bridge` branding, removed decorative lock/warning icons from text labels, and updated onboarding / mount-management copy to better match community-plugin review expectations.
+
 ## [2.13.0] - 2026-03-14
 
 ### Fixed

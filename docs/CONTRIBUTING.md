@@ -63,18 +63,20 @@ Thank you for your interest in contributing to FolderBridge! This document provi
 Before submitting:
 
 ```bash
-# Lint your code
-npx eslint main.ts
+# Check reviewer-facing UI copy style
+npm run check:ui-text
 
-# Type check
-npx tsc --noEmit --skipLibCheck
+# Full local validation
+npm run validate
 
-# Build the plugin
-npm run build
+# Optional: install the repo's pre-commit hook once per clone
+npm run hooks:install
 
 # Test in Obsidian
 # Link plugin to vault and test manually
 ```
+
+The pre-commit hook is optional but recommended for this repository. It keeps UI copy regressions out of commits by running the UI copy style checker before the commit is created.
 
 ### 4. Commit Guidelines
 

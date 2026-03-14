@@ -67,7 +67,7 @@ export class FileWatcher {
         if (this.watcherBackendWarningShown) return;
         this.watcherBackendWarningShown = true;
         if (typeof Notice === 'function') {
-            new Notice('Folder bridge: external file watching is unavailable in this environment. Mounts still work, but filesystem changes made outside Obsidian will not live-sync until the watcher backend is available.');
+            new Notice('Folder Bridge: External file watching is unavailable in this environment. Mounts still work, but filesystem changes made outside Obsidian will not live-sync until the watcher backend is available.');
         }
     }
 

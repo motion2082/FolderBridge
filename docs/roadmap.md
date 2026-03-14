@@ -2,7 +2,7 @@
 
 This document tracks the current status of platform support and planned features. It is updated with each release.
 
-**Current version: v2.13.0** — Last updated: 2026-03-14
+**Current version: v2.14.0** — Last updated: 2026-03-14
 
 ---
 
@@ -22,6 +22,7 @@ This document tracks the current status of platform support and planned features
 
 | Version | What shipped |
 |---------|-------------|
+| v2.14.0 | **Reviewer-focused UI copy enforcement** — added a local UI copy checker, optional pre-commit hook, and sentence-case / branding cleanup across notices, commands, onboarding, and mount-management UI so community-plugin review issues are caught before commit. |
 | v2.13.0 | **Community-plugin reviewer cleanup in TOC parsing** — removed a non-narrowing type assertion in the TOC parser and replaced it with a direct runtime object guard, keeping behavior the same while resolving the reviewer warning in `src/TocConfig.ts`. |
 | v2.12.0 | **Mounted delete sync fix** — deletes initiated through mounted paths now trigger immediate vault removal notifications, so Obsidian no longer keeps stale explorer entries or tries to re-read notes that were already deleted on disk. |
 | v2.11.0 | **Managed TOC workflow for UI mounts** — local and vault mounts created in Settings can now be stored in one writable JSON TOC file while additional external TOC files remain read-only and authoritative. **Guided setup** — the Settings tab now suggests a default managed TOC path and can create/bind/migrate existing UI mounts in one step. |

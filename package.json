@@ -1,12 +1,15 @@
 {
     "name": "folderbridge",
-    "version": "2.13.0",
+    "version": "2.14.0",
     "description": "Adds external folders to your vault as seamless, native-feeling directories. Creates virtual mount points that map real filesystem paths into the vault.",
     "main": "main.js",
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+        "check:ui-text": "node scripts/check-ui-text.mjs",
         "test": "vitest run",
+        "validate": "npm run check:ui-text && npm run build && npm test",
+        "hooks:install": "git config core.hooksPath .githooks",
         "version": "node version-bump.mjs && git add manifest.json versions.json"
     },
     "keywords": [

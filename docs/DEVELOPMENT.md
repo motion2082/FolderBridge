@@ -98,6 +98,27 @@ npm run build
 - No source maps (smaller file size)
 - Use for final testing and releases
 
+#### UI copy style check
+```bash
+npm run check:ui-text
+```
+- Scans common UI text call-sites such as `setName(...)`, `setDesc(...)`, `setTooltip(...)`, `setButtonText(...)`, `setTitle(...)`, `setText(...)`, and `new Notice(...)`
+- Fails on branding and status-label issues such as `Folder bridge:` prefixes, lowercase text after `Folder Bridge:`, and decorative status icons in reviewer-facing UI text
+
+#### Full local validation
+```bash
+npm run validate
+```
+- Runs the UI text check, production build, and full test suite in one command
+
+#### Optional pre-commit hook
+```bash
+npm run hooks:install
+```
+- Configures this clone to use the repo's `.githooks/pre-commit` hook
+- The hook currently runs `npm run check:ui-text` before each commit
+- This is intentionally lightweight so it catches copy regressions without making every commit wait for the full build/test cycle
+
 #### Version Bump
 ```bash
 npm run version
@@ -167,10 +188,12 @@ Obsidian_FolderBridge/
 ├── .hotreload             # Hot-reload marker
 ├── .npmrc                 # npm configuration
 ├── esbuild.config.mjs     # Build configuration
+├── .githooks/             # Optional repo-local git hooks
 ├── main.ts                # Main plugin entry point
 ├── manifest.json          # Plugin metadata
 ├── package.json           # Dependencies and scripts
 ├── README.md              # User documentation
+├── scripts/               # Local validation and maintenance scripts
 ├── DEVELOPMENT.md         # This file
 ├── styles.css             # Plugin styles
 ├── tsconfig.json          # TypeScript configuration
