@@ -4,7 +4,13 @@ Extends Obsidian's single-root vault by letting you mount external folders as se
 
 ---
 
-## Full Feature List (v2.11.0)
+## Full Feature List (v2.13.0)
+
+Current release highlights:
+
+- **Managed TOC workflow** for UI-created local and vault mounts
+- **Mounted delete sync fix** so deleted mounted notes disappear from Obsidian immediately
+- **Community-plugin reviewer cleanup** in the TOC parser to remove a non-narrowing type assertion warning without changing runtime behavior
 
 ### Core
 

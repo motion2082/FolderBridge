@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-03-14
+
+### Fixed
+- **Community-plugin reviewer cleanup in TOC parsing** — removed an unnecessary type assertion in `src/TocConfig.ts` and replaced it with a direct runtime object-shape guard. This keeps the TOC parser behavior unchanged while satisfying the reviewer warning about an assertion that did not narrow the expression type.
+
 ## [2.12.0] - 2026-03-14
 
 ### Fixed

@@ -46,6 +46,10 @@ function cleanObject<T extends object>(value: T): T {
     ) as T;
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function serializeMountToTocEntry(mount: MountPoint): TocFileMount {
     const mountType: TocFileMount['mountType'] = mount.mountType === 'vault' ? 'vault' : 'local';
     const entry: TocFileMount = {
@@ -108,12 +112,12 @@ export function parseTocConfig(text: string, sourcePath: string, deviceId: strin
 
     const mounts: MountPoint[] = [];
     for (const [index, rawMount] of config.mounts.entries()) {
-        if (!rawMount || typeof rawMount !== 'object') {
+        if (!isObjectRecord(rawMount)) {
             warnings.push(`${sourcePath}: mounts[${index}] must be an object.`);
             continue;
         }
 
-        const mount = rawMount as TocFileMount;
+        const mount = rawMount;
         if (typeof mount.virtualPath !== 'string' || typeof mount.realPath !== 'string') {
             warnings.push(`${sourcePath}: mounts[${index}] must include string "virtualPath" and "realPath" values.`);
             continue;
