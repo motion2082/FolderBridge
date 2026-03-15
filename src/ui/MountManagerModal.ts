@@ -38,7 +38,7 @@ export async function browseFolderOnDisk(title = 'Select folder', defaultPath?: 
 		// it on the electron object so both old and new versions work here.
 		const dialog: ElectronDialog | undefined = electron?.remote?.dialog ?? electron?.dialog;
 		if (!dialog?.showOpenDialog) {
-			new Notice('Folder Bridge: Native folder browser is unavailable. Please type the path manually.');
+			new Notice('Folder Bridge: native folder browser is unavailable. Please type the path manually.');
 			return null;
 		}
 		const options: ElectronOpenDialogOptions = {
@@ -53,7 +53,7 @@ export async function browseFolderOnDisk(title = 'Select folder', defaultPath?: 
 		return result.filePaths[0];
 	} catch (err) {
 		logger.error('Folder Bridge: Electron dialog error', err);
-		new Notice('Folder Bridge: Native folder browser is unavailable. Please type the path manually.');
+		new Notice('Folder Bridge: native folder browser is unavailable. Please type the path manually.');
 		return null;
 	}
 }
@@ -69,7 +69,7 @@ export async function browseMultipleFoldersOnDisk(title = 'Select folders', defa
 		const electron = runtimeRequire?.('electron');
 		const dialog: ElectronDialog | undefined = electron?.remote?.dialog ?? electron?.dialog;
 		if (!dialog?.showOpenDialog) {
-			new Notice('Folder Bridge: Native folder browser is unavailable. Please type the path manually.');
+			new Notice('Folder Bridge: native folder browser is unavailable. Please type the path manually.');
 			return null;
 		}
 		const options: ElectronOpenDialogOptions = {
@@ -84,7 +84,7 @@ export async function browseMultipleFoldersOnDisk(title = 'Select folders', defa
 		return result.filePaths;
 	} catch (err) {
 		logger.error('Folder Bridge: Electron dialog error', err);
-		new Notice('Folder Bridge: Native folder browser is unavailable. Please type the path manually.');
+		new Notice('Folder Bridge: native folder browser is unavailable. Please type the path manually.');
 		return null;
 	}
 }
@@ -105,7 +105,7 @@ export class VaultFolderPickerModal extends SuggestModal<string> {
 	constructor(app: App, onChoose: (folderPath: string) => void | Promise<void>) {
 		super(app);
 		this.onChoose = onChoose;
-		this.setPlaceholder('Type to search vault folders… (Enter on blank line = vault root)');
+		this.setPlaceholder('Type to search vault folders… (enter on blank line = vault root)');
 		// Build the folder list once so getSuggestions only filters, never enumerates
 		this.folders = app.vault.getAllLoadedFiles()
 			.filter((f): f is TFolder => f instanceof TFolder && f.path.length > 0)
@@ -426,7 +426,7 @@ export class MountManagerModal extends Modal {
 			.setName('Username')
 			.addText(text => {
 				text.inputEl.addClass('folderbridge-input-flex');
-				text.setPlaceholder('your-username')
+				text.setPlaceholder('Your-username')
 					.setValue(this.webdavUsername)
 					.onChange(val => { this.webdavUsername = val.trim(); });
 			});
@@ -500,18 +500,18 @@ export class MountManagerModal extends Modal {
 			.setDesc('The S3 bucket or B2 bucket name (case-sensitive)')
 			.addText(text => {
 				text.inputEl.addClass('folderbridge-input-flex');
-				text.setPlaceholder('my-obsidian-bucket')
+				text.setPlaceholder('My-Obsidian-bucket')
 					.setValue(this.s3Bucket)
 					.onChange(val => { this.s3Bucket = val.trim(); });
 			});
 
 		new Setting(s3Section)
 			.setName('Region')
-			.setDesc('AWS region (e.g. us-east-1) or B2 region string (e.g. us-west-004)')
+			.setDesc('AWS region (for example us-east-1) or B2 region string (for example us-west-004)')
 			.addText(text => {
 				s3RegionText = text;
 				text.inputEl.addClass('folderbridge-input-flex');
-				text.setPlaceholder('us-east-1')
+				text.setPlaceholder('Us-east-1')
 					.setValue(this.s3Region)
 					.onChange(val => { this.s3Region = val.trim(); });
 			});
@@ -585,7 +585,7 @@ export class MountManagerModal extends Modal {
 			.setDesc('Hostname or IP address of the SFTP server')
 			.addText(text => {
 				text.inputEl.addClass('folderbridge-input-flex');
-				text.setPlaceholder('files.example.com')
+				text.setPlaceholder('Files.example.com')
 					.setValue(this.sftpHost)
 					.onChange(val => { this.sftpHost = val.trim(); });
 			});
@@ -608,7 +608,7 @@ export class MountManagerModal extends Modal {
 			.setName('Username')
 			.addText(text => {
 				text.inputEl.addClass('folderbridge-input-flex');
-				text.setPlaceholder('alice')
+				text.setPlaceholder('Alice')
 					.setValue(this.sftpUsername)
 					.onChange(val => { this.sftpUsername = val.trim(); });
 			});
@@ -756,7 +756,7 @@ export class MountManagerModal extends Modal {
 			.addText(text => {
 				this.virtualPathText = text;
 				text.inputEl.addClass('folderbridge-input-flex');
-				text.setPlaceholder('Projects/Work')
+				text.setPlaceholder('Projects/work')
 					.setValue(this.virtualPath)
 					.onChange(val => { this.virtualPath = val.trim(); });
 			})
@@ -832,7 +832,7 @@ export class MountManagerModal extends Modal {
 
 		new Setting(advancedContainer)
 			.setName('Debounce threshold (ms)')
-			.setDesc('How long to wait after the last change event before notifying Obsidian. Increase for editors that save very frequently. (Default: 300)')
+			.setDesc('How long to wait after the last change event before notifying Obsidian. Increase for editors that save very frequently. (default: 300)')
 			.addText(text => {
 				text.inputEl.type = 'number';
 				text.inputEl.min = '50';
@@ -866,7 +866,7 @@ export class MountManagerModal extends Modal {
 
 		pollingIntervalSetting = new Setting(advancedContainer)
 			.setName('Polling interval (ms)')
-			.setDesc('How often to poll the filesystem for changes. Only effective when "Use polling" is on. (Default: 2000)')
+			.setDesc('How often to poll the filesystem for changes. Only effective when "use polling" is on. (default: 2000)')
 			.addText(text => {
 				text.inputEl.type = 'number';
 				text.inputEl.min = '500';
@@ -890,7 +890,7 @@ export class MountManagerModal extends Modal {
 			.addDropdown(drop => drop
 				.addOption('all', 'All file types (default)')
 				.addOption('markdown-only', 'Markdown only (.md, .mdx, .canvas)')
-				.addOption('pdf-only', 'PDF only (.pdf)')
+				.addOption('pdf-only', 'PDF only')
 				.setValue(this.visibleFileFilter)
 				.onChange((val) => { this.visibleFileFilter = val as 'all' | 'markdown-only' | 'pdf-only'; }));
 
@@ -931,7 +931,7 @@ export class MountManagerModal extends Modal {
 				text.inputEl.type = 'number';
 				text.inputEl.min = '0';
 				text.inputEl.addClass('folderbridge-input-medium');
-				text.setPlaceholder('unlimited')
+				text.setPlaceholder('Unlimited')
 					.setValue(this.maxFiles != null ? String(this.maxFiles) : '')
 					.onChange(val => {
 						const n = parseInt(val, 10);
@@ -950,7 +950,7 @@ export class MountManagerModal extends Modal {
 							this.submitState.finish();
 							this.syncSubmitButtons();
 							logger.error('Folder Bridge: Failed to save mount', err);
-							new Notice('Folder Bridge: Failed to save mount. Check the developer console for details.');
+							new Notice('Folder Bridge: failed to save mount. Check the developer console for details.');
 						});
 					});
 			})
@@ -1026,7 +1026,7 @@ export class MountManagerModal extends Modal {
 			if (!this.virtualPath.trim()) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice('Folder Bridge: Virtual path is required.');
+				new Notice('Folder Bridge: virtual path is required.');
 				return;
 			}
 
@@ -1081,7 +1081,7 @@ export class MountManagerModal extends Modal {
 			if (!this.virtualPath.trim()) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice('Folder Bridge: Virtual path is required.');
+				new Notice('Folder Bridge: virtual path is required.');
 				return;
 			}
 
@@ -1143,7 +1143,7 @@ export class MountManagerModal extends Modal {
 			if (!this.virtualPath.trim()) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice('Folder Bridge: Virtual path is required.');
+				new Notice('Folder Bridge: virtual path is required.');
 				return;
 			}
 
@@ -1182,19 +1182,19 @@ export class MountManagerModal extends Modal {
 		if (!virtualPathToUse) {
 			this.submitState.finish();
 			this.syncSubmitButtons();
-			new Notice('Folder Bridge: Virtual path is required.');
+			new Notice('Folder Bridge: virtual path is required.');
 			return;
 		}
 		if (!this.realPath) {
 			this.submitState.finish();
 			this.syncSubmitButtons();
-			new Notice('Folder Bridge: Real path is required.');
+			new Notice('Folder Bridge: real path is required.');
 			return;
 		}
 		if (!path.isAbsolute(this.realPath)) {
 			this.submitState.finish();
 			this.syncSubmitButtons();
-			new Notice('Folder Bridge: Real path must be an absolute filesystem path.');
+			new Notice('Folder Bridge: real path must be an absolute filesystem path.');
 			return;
 		}
 

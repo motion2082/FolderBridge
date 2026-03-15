@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.14.1] - 2026-03-14
+
+### Fixed
+- **Sentence-case compliance for Obsidian community-plugin review** — resolved all `obsidianmd/ui/sentence-case` lint violations flagged by the PR bot. Installed `eslint-plugin-obsidianmd` and configured it in `eslint.config.mjs` with the full set of project-specific brands (`Folder Bridge`, `WebDAV`, `Amazon S3`, `Backblaze B2`, `Cloudflare R2`, `MinIO`, `Nextcloud`, etc.) and acronyms (`TOC`, `S3`, `SFTP`, `NAS`, `WSL`, `IAM`, etc.). Updated static strings in `main.ts` and `src/ui/MountManagerModal.ts` — lowercasing clause-opening words after `Folder Bridge:` colons, fixing placeholder capitalisation, and rewriting `e.g.` phrases to `(for example …)` to avoid spurious mid-sentence splits.
+
 ## [2.14.0] - 2026-03-14
 
 ### Added

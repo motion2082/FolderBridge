@@ -1,7 +1,9 @@
 import tseslint from 'typescript-eslint';
+import obsidianmd from 'eslint-plugin-obsidianmd';
 
 export default tseslint.config(
-    ...tseslint.configs.recommended, {
+    ...tseslint.configs.recommended,
+    ...obsidianmd.configs.recommended, {
     languageOptions: {
         sourceType: 'module',
         globals: {
@@ -33,17 +35,64 @@ export default tseslint.config(
         '@typescript-eslint/ban-ts-comment': 'off',
         'no-prototype-builtins': 'off',
         '@typescript-eslint/no-empty-function': 'off',
-        // Intentional `any` casts are used throughout for Electron, vault internals,
-        // and lazy-loaded Node.js builtins.  The rule is off so eslint-disable
-        // suppression comments are not needed (and the reviewer's
-        // eslint-comments/no-restricted-disable rule does not trigger).
         '@typescript-eslint/no-explicit-any': 'off',
-        // const plugin = this is required in anonymous FuzzySuggestModal subclasses
-        // where inner method 'this' refers to the modal, not the outer plugin
         '@typescript-eslint/no-this-alias': 'off',
-        // require('electron') is the correct Obsidian/Electron pattern
         '@typescript-eslint/no-require-imports': 'off',
         '@typescript-eslint/no-var-requires': 'off',
+        // Configure sentence-case with project-specific brands and acronyms.
+        // brands/acronyms replace the defaults so the full default lists must be
+        // included alongside our additions.
+        'obsidianmd/ui/sentence-case': ['warn', {
+            brands: [
+                // Default brands (preserved so we do not lose built-in recognition)
+                'iOS', 'iPadOS', 'macOS', 'Windows', 'Android', 'Linux',
+                'Obsidian', 'Obsidian Sync', 'Obsidian Publish',
+                'Google Drive', 'Dropbox', 'OneDrive', 'iCloud Drive',
+                'YouTube', 'Slack', 'Discord', 'Telegram', 'WhatsApp', 'Twitter', 'X',
+                'Readwise', 'Zotero', 'Excalidraw', 'Mermaid',
+                'Markdown', 'LaTeX', 'JavaScript', 'TypeScript', 'Node.js',
+                'npm', 'pnpm', 'Yarn', 'Git', 'GitHub', 'GitLab',
+                'Notion', 'Evernote', 'Roam Research', 'Logseq', 'Anki',
+                'Reddit', 'VS Code', 'Visual Studio Code', 'IntelliJ IDEA', 'WebStorm', 'PyCharm',
+                // Project-specific brands
+                'Folder Bridge',
+                'WebDAV', // mixed-case acronym; must be a brand to preserve casing
+                'Amazon S3',
+                'Backblaze B2',
+                'Cloudflare R2',
+                'MinIO',
+                'Nextcloud',
+                'Synology',
+                'Syncthing',
+                'QuickAdd',
+                'Quick Switcher',
+            ],
+            acronyms: [
+                // Default acronyms (preserved so we do not lose built-in recognition)
+                'API', 'HTTP', 'HTTPS', 'URL', 'DNS', 'TCP', 'IP',
+                'SSH', 'TLS', 'SSL', 'FTP', 'SFTP', 'SMTP',
+                'JSON', 'XML', 'HTML', 'CSS', 'PDF', 'CSV', 'YAML', 'SQL',
+                'PNG', 'JPG', 'JPEG', 'GIF', 'SVG',
+                '2FA', 'MFA', 'OAuth', 'JWT', 'LDAP', 'SAML',
+                'SDK', 'IDE', 'CLI', 'GUI', 'CRUD', 'REST', 'SOAP',
+                'CPU', 'GPU', 'RAM', 'SSD', 'USB',
+                'UI', 'OK', 'RSS', 'S3',
+                'ID', 'UUID', 'GUID', 'SHA', 'MD5', 'ASCII',
+                'UTF-8', 'UTF-16', 'DOM', 'CDN', 'FAQ', 'AI', 'ML',
+                // Project-specific acronyms
+                'TOC', // table of contents
+                'NAS', // network-attached storage
+                'WSL', // Windows Subsystem for Linux
+                'IAM', // AWS Identity and Access Management
+                'DSM', // Synology DiskStation Manager
+                'QNAP', // QNAP brand (also used acronym-style in labels)
+                'OS', // operating system
+                'MB', // megabytes
+                'URI', // uniform resource identifier
+                'AWS', // Amazon Web Services
+                'B2', // Backblaze B2 storage class
+            ],
+        }],
     },
 },
 );

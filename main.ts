@@ -71,7 +71,7 @@ function openExternalUrl(url: string): void {
 function backgroundTask(task: Promise<void>, context: string): void {
 	void task.catch(error => {
 		logger.error(`[FolderBridge] ${context}`, error);
-		new Notice('Folder Bridge: A background mount refresh failed. Check the developer console for details.');
+		new Notice('Folder Bridge: a background mount refresh failed. Check the developer console for details.');
 	});
 }
 
@@ -171,11 +171,11 @@ export default class FolderBridgePlugin extends Plugin {
 	private async writeManagedTocMounts(mounts: MountPoint[]): Promise<boolean> {
 		const sourcePath = this.getManagedTocSourcePath();
 		if (!sourcePath) {
-			new Notice('Folder Bridge: Configure a managed TOC file first.');
+			new Notice('Folder Bridge: configure a managed TOC file first.');
 			return false;
 		}
 		if (!fs?.promises || !path) {
-			new Notice('Folder Bridge: Writable TOC files are only supported on desktop builds with filesystem access.');
+			new Notice('Folder Bridge: writable TOC files are only supported on desktop builds with filesystem access.');
 			return false;
 		}
 		const unsupportedMount = mounts.find(mount => this.isCloudMount(mount));
@@ -192,7 +192,7 @@ export default class FolderBridgePlugin extends Plugin {
 	async bindManagedTocSource(sourcePath: string): Promise<boolean> {
 		const trimmedPath = this.resolveManagedTocSourcePath(sourcePath);
 		if (!trimmedPath) {
-			new Notice('Folder Bridge: Managed TOC file path cannot be determined automatically. Enter an absolute path first.');
+			new Notice('Folder Bridge: managed TOC file path cannot be determined automatically. Enter an absolute path first.');
 			return false;
 		}
 
@@ -219,7 +219,7 @@ export default class FolderBridgePlugin extends Plugin {
 	async createManagedTocFromCurrentMounts(sourcePath: string): Promise<{ success: boolean; moved: number; skipped: number; targetPath: string | null }> {
 		const targetPath = this.resolveManagedTocSourcePath(sourcePath);
 		if (!targetPath) {
-			new Notice('Folder Bridge: Enter a managed TOC file path first.');
+			new Notice('Folder Bridge: enter a managed TOC file path first.');
 			return { success: false, moved: 0, skipped: 0, targetPath: null };
 		}
 
@@ -252,7 +252,7 @@ export default class FolderBridgePlugin extends Plugin {
 	async migrateLocalManualMountsToManagedToc(): Promise<{ moved: number; skipped: number }> {
 		const sourcePath = this.getManagedTocSourcePath();
 		if (!sourcePath) {
-			new Notice('Folder Bridge: Configure a managed TOC file first.');
+			new Notice('Folder Bridge: configure a managed TOC file first.');
 			return { moved: 0, skipped: 0 };
 		}
 
@@ -455,7 +455,7 @@ export default class FolderBridgePlugin extends Plugin {
 		});
 
 		// Ribbon icon opens the add-mount modal
-		const ribbonIconEl = this.addRibbonIcon('folder-plus', 'Folder Bridge: Add mount', () => {
+		const ribbonIconEl = this.addRibbonIcon('folder-plus', 'Folder Bridge: add mount', () => {
 			new MountManagerModal(this.app, this.security, (mount) => this.addMount(mount)).open();
 		});
 		ribbonIconEl.addClass('folderbridge-ribbon-class');
@@ -478,7 +478,7 @@ export default class FolderBridgePlugin extends Plugin {
 					for (const mount of this.settings.mountPoints.filter(m => m.enabled && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts))) {
 						await this.notifyVaultMountAdded(mount);
 					}
-					new Notice('Folder Bridge: Mounts refreshed');
+					new Notice('Folder Bridge: mounts refreshed');
 				})();
 			}
 		});
@@ -486,7 +486,7 @@ export default class FolderBridgePlugin extends Plugin {
 		// Command: open add-mount modal
 		this.addCommand({
 			id: 'add-mount',
-			name: 'Add Mount',
+			name: 'Add mount',
 			callback: () => {
 				new MountManagerModal(this.app, this.security, (mount) => this.addMount(mount)).open();
 			},
@@ -495,7 +495,7 @@ export default class FolderBridgePlugin extends Plugin {
 		// Command: open plugin settings tab
 		this.addCommand({
 			id: 'open-settings',
-			name: 'Open Settings',
+			name: 'Open settings',
 			callback: () => {
 				(this.app as App & AppInternal).setting?.open?.();
 				(this.app as App & AppInternal).setting?.openTabById?.('folderbridge');
@@ -511,7 +511,7 @@ export default class FolderBridgePlugin extends Plugin {
 					m => this.isUserEditableMount(m) && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts),
 				);
 				if (myMounts.length === 0) {
-					new Notice('Folder Bridge: No mounts configured.');
+					new Notice('Folder Bridge: no mounts configured.');
 					return;
 				}
 				// Inline FuzzySuggestModal — avoids a separate file for a small feature
@@ -555,7 +555,7 @@ export default class FolderBridgePlugin extends Plugin {
 						m => m.enabled && !this.mountHealthMap.get(m.id),
 					);
 					if (unreachable.length === 0) {
-						new Notice('Folder Bridge: All mounts are reachable.');
+						new Notice('Folder Bridge: all mounts are reachable.');
 						return;
 					}
 					let reconnected = 0;
@@ -578,7 +578,7 @@ export default class FolderBridgePlugin extends Plugin {
 				void (async () => {
 					const myMounts = this.settings.mountPoints.filter(m => this.isUserEditableMount(m) && m.deviceId === this.settings.deviceId);
 					if (myMounts.length === 0) {
-						new Notice('Folder Bridge: No mounts configured.');
+						new Notice('Folder Bridge: no mounts configured.');
 						return;
 					}
 					// If any mount is currently writable, make all read-only; otherwise unlock all.
@@ -600,7 +600,7 @@ export default class FolderBridgePlugin extends Plugin {
 					m => this.isUserEditableMount(m) && (m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts),
 				);
 				if (myMounts.length === 0) {
-					new Notice('Folder Bridge: No mounts configured.');
+					new Notice('Folder Bridge: no mounts configured.');
 					return;
 				}
 				const modal = new (class extends FuzzySuggestModal<MountPoint> {
@@ -641,7 +641,7 @@ export default class FolderBridgePlugin extends Plugin {
 					m => m.deviceId === this.settings.deviceId || this.settings.allowForeignMounts,
 				);
 				if (myMounts.length === 0) {
-					new Notice('Folder Bridge: No mounts configured.');
+					new Notice('Folder Bridge: no mounts configured.');
 					return;
 				}
 				const modal = new (class extends FuzzySuggestModal<MountPoint> {
@@ -1992,7 +1992,7 @@ export default class FolderBridgePlugin extends Plugin {
 		const unreachableCount = [...this.mountHealthMap.values()].filter(v => v === false).length;
 		const allSuppressed = this.fileWatcher?.isSuppressedAll() ?? false;
 		if (allSuppressed) {
-			this.statusBarItem.setText('Folder Bridge: Events paused');
+			this.statusBarItem.setText('Folder Bridge: events paused');
 			this.statusBarItem.classList.remove('folderbridge-status-warning');
 			this.statusBarItem.classList.add('folderbridge-status-suppressed');
 		} else if (unreachableCount > 0) {
@@ -2464,7 +2464,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 						if (result.moved > 0 || result.skipped > 0) {
 							new Notice(`Folder Bridge: Moved ${result.moved} local/vault mount(s) to the managed TOC file.${result.skipped ? ` ${result.skipped} cloud mount(s) stayed in data.json.` : ''}`);
 						} else {
-							new Notice('Folder Bridge: No local or vault UI mounts needed migration.');
+							new Notice('Folder Bridge: no local or vault UI mounts needed migration.');
 						}
 						this.display();
 					})();
@@ -2610,7 +2610,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 									? parsed                        // legacy bare array
 									: parsed.mountPoints ?? [];    // { version, mountPoints }
 								if (!Array.isArray(mounts) || mounts.length === 0) {
-									new Notice('Folder Bridge: No mount points found in the selected file.');
+									new Notice('Folder Bridge: no mount points found in the selected file.');
 									return;
 								}
 
@@ -2641,7 +2641,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 								new Notice(`Folder Bridge: Imported ${added} mount(s).${skipped ? ` ${skipped} skipped (invalid).` : ''}`);
 								this.display();
 							} catch {
-								new Notice('Folder Bridge: Failed to parse the selected file. Is it a valid Folder Bridge export?');
+								new Notice('Folder Bridge: failed to parse the selected file. Is it a valid Folder Bridge export?');
 							}
 						})();
 					};
@@ -2702,13 +2702,13 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 						void (async () => {
 							if (!isUserEditable) {
 								toggle.setValue(mount.enabled);
-								new Notice('Folder Bridge: This mount is managed by an external config file. Edit the source file to change it.');
+								new Notice('Folder Bridge: this mount is managed by an external config file. Edit the source file to change it.');
 								return;
 							}
 							if (!canEnable) {
 								// Revert the toggle visually if they try to enable a foreign mount
 								toggle.setValue(false);
-								new Notice('Folder Bridge: Cannot enable a mount created on a different device.');
+								new Notice('Folder Bridge: cannot enable a mount created on a different device.');
 								return;
 							}
 
@@ -2749,7 +2749,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 					.onClick(() => {
 						void (async () => {
 							if (!isUserEditable) {
-								new Notice('Folder Bridge: This mount is managed by an external config file. Edit the source file to change it.');
+								new Notice('Folder Bridge: this mount is managed by an external config file. Edit the source file to change it.');
 								return;
 							}
 							await this.plugin.setMountReadOnly(mount.id, !mount.readOnly);
@@ -2785,7 +2785,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 								this.plugin.fileWatcher?.startWatching(mount);
 							}
 							this.display();
-							new Notice('Folder Bridge: Path overridden for this device.');
+							new Notice('Folder Bridge: path overridden for this device.');
 						}
 					})();
 				}));

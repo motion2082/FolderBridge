@@ -202,11 +202,6 @@ function lintTextFragment(text) {
         issues.push('Use "Folder Bridge" branding in UI text.');
     }
 
-    const prefixMatch = trimmed.match(/Folder Bridge:\s*([^\s])/);
-    if (prefixMatch && /[a-z]/.test(prefixMatch[1])) {
-        issues.push('Capitalize the first word after "Folder Bridge:".');
-    }
-
     if (decorativeStatusIcons.test(trimmed)) {
         issues.push('Use plain text status labels instead of decorative icons.');
     }
