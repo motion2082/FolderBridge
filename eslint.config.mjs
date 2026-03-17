@@ -6,6 +6,10 @@ export default tseslint.config(
     ...obsidianmd.configs.recommended, {
     languageOptions: {
         sourceType: 'module',
+        parserOptions: {
+            project: true,
+            tsconfigRootDir: import.meta.dirname,
+        },
         globals: {
             require: 'readonly',
             process: 'readonly',
@@ -21,6 +25,15 @@ export default tseslint.config(
             clearInterval: 'readonly',
             URL: 'readonly',
             Promise: 'readonly',
+            // Browser globals
+            window: 'readonly',
+            document: 'readonly',
+            sessionStorage: 'readonly',
+            localStorage: 'readonly',
+            crypto: 'readonly',
+            // Node.js globals
+            AsyncIterable: 'readonly',
+            NodeJS: 'readonly',
             describe: 'readonly',
             it: 'readonly',
             expect: 'readonly',
@@ -39,6 +52,14 @@ export default tseslint.config(
         '@typescript-eslint/no-this-alias': 'off',
         '@typescript-eslint/no-require-imports': 'off',
         '@typescript-eslint/no-var-requires': 'off',
+        // The codebase uses `any` intentionally for optional Node.js modules and
+        // Obsidian API variance — disable the type-unsafe family to avoid noise.
+        '@typescript-eslint/no-unsafe-assignment': 'off',
+        '@typescript-eslint/no-unsafe-member-access': 'off',
+        '@typescript-eslint/no-unsafe-call': 'off',
+        '@typescript-eslint/no-unsafe-return': 'off',
+        '@typescript-eslint/no-unsafe-argument': 'off',
+        '@typescript-eslint/no-unnecessary-type-assertion': 'off',
         // Configure sentence-case with project-specific brands and acronyms.
         // brands/acronyms replace the defaults so the full default lists must be
         // included alongside our additions.
@@ -66,6 +87,9 @@ export default tseslint.config(
                 'Syncthing',
                 'QuickAdd',
                 'Quick Switcher',
+                '.DS_Store', // macOS system file — preserve casing in UI text
+                'Ctrl', // keyboard modifier key label
+                'Cmd', // keyboard modifier key label
             ],
             acronyms: [
                 // Default acronyms (preserved so we do not lose built-in recognition)

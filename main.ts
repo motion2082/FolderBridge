@@ -1760,31 +1760,32 @@ export default class FolderBridgePlugin extends Plugin {
 		if (typeof vault.onChange !== 'function') return;
 
 		const nPath = normalizePath(mount.virtualPath);
-		if (!this.app.vault.getAbstractFileByPath(nPath)) return;
+		const mountFolder = this.app.vault.getAbstractFileByPath(nPath);
+		if (!mountFolder) return;
 
-		// Recursively remove all files and folders inside the mount
-		const recursivelyRemoveVault = async (folderPath: string) => {
-			try {
-				const list = await this.app.vault.adapter.list(folderPath);
-				for (const file of list.files) {
-					if (this.app.vault.getAbstractFileByPath(file)) {
-						logger.debug(`[FolderBridge] Removing file from UI: ${file}`);
-						await vault.onChange('file-removed', file, null, null);
-					}
+		// Recursively remove all files and folders inside the mount using the
+		// vault's in-memory tree.  This avoids calling adapter.list() (which
+		// routes through VirtualAdapter and makes real FS / network calls) and
+		// therefore prevents the "list: found mount for" log spam, eliminates
+		// unnecessary I/O, and stops the visible file-explorer flicker caused
+		// by the adapter re-enumerating the directory while files are being
+		// removed.
+		const recursivelyRemoveVault = async (folder: TFolder): Promise<void> => {
+			for (const child of [...folder.children]) {
+				if (child instanceof TFolder) {
+					await recursivelyRemoveVault(child);
+					logger.debug(`[FolderBridge] Removing folder from UI: ${child.path}`);
+					await vault.onChange('folder-removed', child.path, null, null);
+				} else {
+					logger.debug(`[FolderBridge] Removing file from UI: ${child.path}`);
+					await vault.onChange('file-removed', child.path, null, null);
 				}
-				for (const folder of list.folders) {
-					await recursivelyRemoveVault(folder);
-					if (this.app.vault.getAbstractFileByPath(folder)) {
-						logger.debug(`[FolderBridge] Removing folder from UI: ${folder}`);
-						await vault.onChange('folder-removed', folder, null, null);
-					}
-				}
-			} catch (e) {
-				logger.debug(`Folder Bridge: Failed to list ${folderPath} during removal`, e);
 			}
 		};
 
-		await recursivelyRemoveVault(nPath);
+		if (mountFolder instanceof TFolder) {
+			await recursivelyRemoveVault(mountFolder);
+		}
 
 		try {
 			logger.debug(`[FolderBridge] Removing root mount folder from UI: ${nPath}`);
@@ -2105,7 +2106,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 		});
 		syncWarning.createEl('strong', { text: 'Sync warning:' });
 		syncWarning.appendText(' If you use Obsidian Sync or Syncthing, you ');
-		syncWarning.createEl('strong', { text: 'must' });
+		syncWarning.createEl('strong', { text: 'Must' });
 		syncWarning.appendText(' add your virtual folder names to your sync ignore list (e.g. ');
 		syncWarning.createEl('code', { text: '.stignore' });
 		syncWarning.appendText(' or Obsidian Sync Excluded Folders). Otherwise, your sync engine will try to upload the entire contents of your mounted folders!');
@@ -2225,7 +2226,10 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			globalIgnoreContainer.empty();
 			const list = this.plugin.settings.globalIgnorePatterns || [];
 			if (list.length === 0) {
-				globalIgnoreContainer.createEl('p', { text: 'No global patterns. Files like .DS_Store are visible in all mounts.', cls: 'setting-item-description' });
+				globalIgnoreContainer.createEl('p', {
+					text: 'No global patterns. Files like .DS_Store are visible in all mounts.',
+					cls: 'setting-item-description'
+				});
 			}
 			for (const item of list) {
 				const itemEl = globalIgnoreContainer.createDiv('folderbridge-ignore-item');
@@ -2651,7 +2655,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 		// Render each existing mount (status loaded async below)
 		if (this.plugin.settings.mountPoints.length === 0) {
 			containerEl.createEl('p', {
-				text: 'No mounts configured yet. Click "Add mount point" to get started.',
+				text: 'No mounts configured yet. Click "add mount point" to get started.',
 				cls: 'setting-item-description',
 			});
 		}

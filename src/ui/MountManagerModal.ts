@@ -294,7 +294,7 @@ export class MountManagerModal extends Modal {
 		if (isMobile) {
 			// On mobile, only WebDAV and S3 mounts are supported
 			contentEl.createEl('p', {
-				text: 'On mobile, only WebDAV and S3 mounts are supported. Local filesystem, vault, and SFTP mounts require Obsidian Desktop.',
+				text: 'On mobile, only WebDAV and S3 mounts are supported. Local filesystem, vault, and SFTP mounts require Obsidian desktop.',
 				cls: 'setting-item-description',
 			});
 			contentEl.createEl('p', {

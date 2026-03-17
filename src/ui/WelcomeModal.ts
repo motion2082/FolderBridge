@@ -44,7 +44,7 @@ export class WelcomeModal extends Modal {
 		});
 
 		const tipBox = contentEl.createDiv({ cls: 'folderbridge-tip-box' });
-		tipBox.createEl('strong', { text: '💡 Quick tip: ' });
+		tipBox.createEl('strong', { text: '💡 quick tip: ' });
 		tipBox.appendText('After adding a mount, you can manage it from ');
 		tipBox.createEl('strong', { text: 'Settings, then Folder Bridge' });
 		tipBox.appendText('. Per-mount options: read-only, custom ignore list, watcher tuning, and device-specific path overrides.');
