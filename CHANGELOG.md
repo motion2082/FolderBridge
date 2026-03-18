@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-03-18
+
+### Fixed
+- **TypeScript error in `FolderBridgeSettingTab`** — seven `this.manifest.name` references inside `FolderBridgeSettingTab` (which extends `PluginSettingTab`, not `Plugin`) were changed to `this.plugin.manifest.name`. `PluginSettingTab` has no `manifest` property; the fixes resolve all seven `TS2339` type errors surfaced by `tsc --noEmit`.
+- **ESLint config now matches the review bot exactly** — added `enforceCamelCaseLower: true` to the `obsidianmd/ui/sentence-case` rule options, matching the bot's `recommended` config. Previously our local config would silently pass CamelCase mid-sentence tokens that the bot would flag.
+
 ## [2.15.0] - 2026-03-18
 
 ### Fixed

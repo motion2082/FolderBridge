@@ -2468,7 +2468,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 						if (result.moved > 0 || result.skipped > 0) {
 							new Notice(`Folder Bridge: Moved ${result.moved} local/vault mount(s) to the managed TOC file.${result.skipped ? ` ${result.skipped} cloud mount(s) stayed in data.json.` : ''}`);
 						} else {
-							new Notice(`${this.manifest.name}: no local or vault UI mounts needed migration.`);
+							new Notice(`${this.plugin.manifest.name}: no local or vault UI mounts needed migration.`);
 						}
 						this.display();
 					})();
@@ -2614,7 +2614,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 									? parsed                        // legacy bare array
 									: parsed.mountPoints ?? [];    // { version, mountPoints }
 								if (!Array.isArray(mounts) || mounts.length === 0) {
-									new Notice(`${this.manifest.name}: no mount points found in the selected file.`);
+									new Notice(`${this.plugin.manifest.name}: no mount points found in the selected file.`);
 									return;
 								}
 
@@ -2645,7 +2645,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 								new Notice(`Folder Bridge: Imported ${added} mount(s).${skipped ? ` ${skipped} skipped (invalid).` : ''}`);
 								this.display();
 							} catch {
-								new Notice(`${this.manifest.name}: failed to parse the selected file. Is it a valid Folder Bridge export?`);
+								new Notice(`${this.plugin.manifest.name}: failed to parse the selected file. Is it a valid Folder Bridge export?`);
 							}
 						})();
 					};
@@ -2706,13 +2706,13 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 						void (async () => {
 							if (!isUserEditable) {
 								toggle.setValue(mount.enabled);
-								new Notice(`${this.manifest.name}: this mount is managed by an external config file. Edit the source file to change it.`);
+								new Notice(`${this.plugin.manifest.name}: this mount is managed by an external config file. Edit the source file to change it.`);
 								return;
 							}
 							if (!canEnable) {
 								// Revert the toggle visually if they try to enable a foreign mount
 								toggle.setValue(false);
-								new Notice(`${this.manifest.name}: cannot enable a mount created on a different device.`);
+								new Notice(`${this.plugin.manifest.name}: cannot enable a mount created on a different device.`);
 								return;
 							}
 
@@ -2753,7 +2753,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 					.onClick(() => {
 						void (async () => {
 							if (!isUserEditable) {
-								new Notice(`${this.manifest.name}: this mount is managed by an external config file. Edit the source file to change it.`);
+								new Notice(`${this.plugin.manifest.name}: this mount is managed by an external config file. Edit the source file to change it.`);
 								return;
 							}
 							await this.plugin.setMountReadOnly(mount.id, !mount.readOnly);
@@ -2789,7 +2789,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 								this.plugin.fileWatcher?.startWatching(mount);
 							}
 							this.display();
-							new Notice(`${this.manifest.name}: path overridden for this device.`);
+							new Notice(`${this.plugin.manifest.name}: path overridden for this device.`);
 						}
 					})();
 				}));

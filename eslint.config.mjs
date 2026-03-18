@@ -116,6 +116,8 @@ export default tseslint.config(
                 'AWS', // Amazon Web Services
                 'B2', // Backblaze B2 storage class
             ],
+            // Match the bot's recommended config: flag CamelCase mid-sentence
+            enforceCamelCaseLower: true,
         }],
     },
 },
