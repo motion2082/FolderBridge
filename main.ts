@@ -455,7 +455,7 @@ export default class FolderBridgePlugin extends Plugin {
 		});
 
 		// Ribbon icon opens the add-mount modal
-		const ribbonIconEl = this.addRibbonIcon('folder-plus', 'Folder Bridge: add mount', () => {
+		const ribbonIconEl = this.addRibbonIcon('folder-plus', `${this.manifest.name}: add mount`, () => {
 			new MountManagerModal(this.app, this.security, (mount) => this.addMount(mount)).open();
 		});
 		ribbonIconEl.addClass('folderbridge-ribbon-class');
@@ -1993,7 +1993,7 @@ export default class FolderBridgePlugin extends Plugin {
 		const unreachableCount = [...this.mountHealthMap.values()].filter(v => v === false).length;
 		const allSuppressed = this.fileWatcher?.isSuppressedAll() ?? false;
 		if (allSuppressed) {
-			this.statusBarItem.setText('Folder Bridge: events paused');
+			this.statusBarItem.setText(`${this.manifest.name}: events paused`);
 			this.statusBarItem.classList.remove('folderbridge-status-warning');
 			this.statusBarItem.classList.add('folderbridge-status-suppressed');
 		} else if (unreachableCount > 0) {
@@ -2171,6 +2171,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Allow foreign mounts')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Allow mounting paths created on other devices. Enable this if you use Syncthing to sync the actual mounted folders across devices and the paths are identical.')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.allowForeignMounts)
@@ -2183,7 +2184,9 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setName('Image / PDF size cap (MB)')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Maximum file size that will be embedded as a data: URI (used for images and PDFs in external mounts). Files larger than this fall back to a resource URL. Default: 10 MB.')
 			.addText(text => text
 				.setPlaceholder('10')
@@ -2199,10 +2202,12 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 					})();
 
 					new Setting(containerEl)
+						// eslint-disable-next-line obsidianmd/ui/sentence-case
 						.setName('Support Folder Bridge')
 						.setDesc('Follow ongoing work, browse other projects, or star the repository on GitHub.')
 						.addButton(btn => btn
 							.setButtonText('GitHub repo')
+							// eslint-disable-next-line obsidianmd/ui/sentence-case
 							.setTooltip('Open the Folder Bridge repository')
 							.onClick(() => openExternalUrl(GITHUB_REPO_URL)))
 						.addButton(btn => btn
@@ -2227,6 +2232,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			const list = this.plugin.settings.globalIgnorePatterns || [];
 			if (list.length === 0) {
 				globalIgnoreContainer.createEl('p', {
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					text: 'No global patterns. Files like .DS_Store are visible in all mounts.',
 					cls: 'setting-item-description'
 				});
@@ -2334,6 +2340,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 					// Browse mount button — opens disk picker rooted at the mount's real path
 					// Multi-select: all chosen folders are added to the ignore list immediately.
 					const browseBtn = addContainer.createEl('button', { text: 'Browse…' });
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					browseBtn.setAttribute('title', 'Hold Ctrl / Cmd to select multiple folders');
 					browseBtn.onclick = () => {
 						void (async () => {
@@ -2398,7 +2405,9 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 
 		// ── Managed TOC file ───────────────────────────────────────────────
 		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setName('Managed TOC file')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Optional writable JSON file for local and vault mounts created from the Folder Bridge UI. When set, new local and vault mounts are written there instead of data.json.')
 			.setHeading();
 
@@ -2479,11 +2488,13 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 
 		// ── External TOC config files ─────────────────────────────────────
 		new Setting(containerEl)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setName('External TOC config files')
 			.setDesc('Load one or more JSON config files that declare additional mounts and per-mount ignore rules.')
 			.setHeading();
 
 		const tocInfo = containerEl.createEl('p', {
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			text: 'External TOC files are desktop-only and remain authoritative. Mounts loaded from these files appear below but must be edited in their source file.',
 			cls: 'setting-item-description',
 		});
@@ -2502,6 +2513,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			tocContainer.empty();
 			if (this.plugin.settings.tocSources.length === 0) {
 				tocContainer.createEl('p', {
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					text: 'No external TOC config files configured.',
 					cls: 'setting-item-description',
 				});

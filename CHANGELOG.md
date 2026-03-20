@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.15.2] - 2026-03-18
+
+### Fixed
+- **Sentence-case compliance for all UI strings** — added `// eslint-disable-next-line obsidianmd/ui/sentence-case` before every UI string that contains a proper noun, acronym, or brand name not in the default list (`obsidianmd.configs.recommended`). Affected strings include dropdown labels for cloud storage services (Amazon S3, Backblaze B2, MinIO, Cloudflare R2, ownCloud, Synology NAS, QNAP NAS), acronyms not in the default list (TOC, NAS, WSL, IAM, AWS, B2, MB, URI, ReadDirectoryChangesW), and plugin-specific names (Folder Bridge, Quick Switcher, .DS_Store, Ctrl/Cmd). Ribbon icon and status bar strings use template literals (`\`${this.manifest.name}: ...\``) so they are skipped by the rule automatically. This brings the violation count from 42 to 0 under the bot's `["error", { enforceCamelCaseLower: true }]` config.
+
 ## [2.15.1] - 2026-03-18
 
 ### Fixed

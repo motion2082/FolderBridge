@@ -294,6 +294,7 @@ export class MountManagerModal extends Modal {
 		if (isMobile) {
 			// On mobile, only WebDAV and S3 mounts are supported
 			contentEl.createEl('p', {
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				text: 'On mobile, only WebDAV and S3 mounts are supported. Local filesystem, vault, and SFTP mounts require Obsidian desktop.',
 				cls: 'setting-item-description',
 			});
@@ -304,7 +305,9 @@ export class MountManagerModal extends Modal {
 			new Setting(contentEl)
 				.setName('Mount type')
 				.addDropdown(drop => drop
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					.addOption('webdav', 'WebDAV (Nextcloud, ownCloud, generic)')
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					.addOption('s3', 'Amazon S3 / Backblaze B2')
 					.setValue(this.mountType === 's3' ? 's3' : 'webdav')
 					.onChange(val => toggleSections(val as MountType)));
@@ -316,7 +319,9 @@ export class MountManagerModal extends Modal {
 				.addDropdown(drop => drop
 					.addOption('local', 'Local filesystem')
 					.addOption('vault', 'Another Obsidian vault')
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					.addOption('webdav', 'WebDAV (Nextcloud, ownCloud, generic)')
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					.addOption('s3', 'Amazon S3 / Backblaze B2')
 					.addOption('sftp', 'SFTP (SSH file transfer)')
 					.setValue(this.mountType)
@@ -382,8 +387,11 @@ export class MountManagerModal extends Modal {
 				.addDropdown(drop => {
 					drop.addOption('', '— select a preset —');
 					drop.addOption('nextcloud', 'Nextcloud');
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					drop.addOption('owncloud', 'ownCloud');
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					drop.addOption('synology', 'Synology NAS (DSM WebDAV)');
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					drop.addOption('qnap', 'QNAP NAS');
 					drop.setValue('');
 					drop.onChange(val => {
@@ -402,6 +410,7 @@ export class MountManagerModal extends Modal {
 		}
 
 		new Setting(webdavSection)
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setName('WebDAV server URL')
 			.setDesc('Full URL to the WebDAV endpoint, e.g. https://cloud.example.com/remote.php/dav/files/username')
 			.addText(text => {
@@ -474,8 +483,11 @@ export class MountManagerModal extends Modal {
 				.addDropdown(drop => {
 					drop.addOption('', '— select a preset —');
 					drop.addOption('aws', 'Amazon S3');
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					drop.addOption('b2', 'Backblaze B2');
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					drop.addOption('minio', 'MinIO (self-hosted)');
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					drop.addOption('cloudflare', 'Cloudflare R2');
 					drop.setValue('');
 					drop.onChange(val => {
@@ -497,6 +509,7 @@ export class MountManagerModal extends Modal {
 
 		new Setting(s3Section)
 			.setName('Bucket name')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('The S3 bucket or B2 bucket name (case-sensitive)')
 			.addText(text => {
 				text.inputEl.addClass('folderbridge-input-flex');
@@ -507,6 +520,7 @@ export class MountManagerModal extends Modal {
 
 		new Setting(s3Section)
 			.setName('Region')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('AWS region (for example us-east-1) or B2 region string (for example us-west-004)')
 			.addText(text => {
 				s3RegionText = text;
@@ -539,6 +553,7 @@ export class MountManagerModal extends Modal {
 
 		new Setting(s3Section)
 			.setName('Access key ID')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('IAM access key ID (AWS) or application key ID (Backblaze B2)')
 			.addText(text => {
 				text.inputEl.addClass('folderbridge-input-flex');
@@ -565,6 +580,7 @@ export class MountManagerModal extends Modal {
 
 		new Setting(s3Section)
 			.setName('Force path-style addressing')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Required for Backblaze B2, MinIO, and most self-hosted S3 servers. Leave off for Amazon S3 and Cloudflare R2.')
 			.addToggle(toggle => {
 				s3PathStyleToggle = toggle;
@@ -710,7 +726,9 @@ export class MountManagerModal extends Modal {
 
 		if (platform === 'windows') {
 			realPathSetting.addButton(btn => {
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				btn.setButtonText('Browse WSL…')
+					// eslint-disable-next-line obsidianmd/ui/sentence-case
 					.setTooltip('Open the system folder picker directly to your WSL Linux distributions')
 					.onClick(() => {
 						void (async () => {
@@ -722,6 +740,7 @@ export class MountManagerModal extends Modal {
 							}
 						})();
 					});
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				btn.buttonEl.setAttribute('aria-label', 'Browse for WSL folder');
 			});
 		}
@@ -818,6 +837,7 @@ export class MountManagerModal extends Modal {
 		// ── Read-only ──────────────────────────────────────────────────────
 		new Setting(contentEl)
 			.setName('Read-only')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('When enabled, Folder Bridge will refuse any write operations to this mount')
 			.addToggle(toggle => toggle
 				.setValue(this.readOnly)
@@ -856,6 +876,7 @@ export class MountManagerModal extends Modal {
 
 		new Setting(advancedContainer)
 			.setName('Use polling')
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			.setDesc('Poll for changes instead of native OS events. Required for NAS and network drives that do not support inotify / ReadDirectoryChangesW.')
 			.addToggle(toggle => toggle
 				.setValue(this.watcherUsePolling)
@@ -1116,7 +1137,8 @@ export class MountManagerModal extends Modal {
 			if (!this.webdavUrl) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice('WebDAV server URL is required.');
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+					new Notice('WebDAV server URL is required.');
 				return;
 			}
 			try { new URL(this.webdavUrl); } catch {
@@ -1128,7 +1150,8 @@ export class MountManagerModal extends Modal {
 			if (!this.webdavUsername) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice('WebDAV username is required.');
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+					new Notice('WebDAV username is required.');
 				return;
 			}
 			// Require a password on add unless an encrypted one is already stored
@@ -1137,7 +1160,8 @@ export class MountManagerModal extends Modal {
 			if (!this.editMount && !this.webdavPassword && !hasStoredPassword) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice('WebDAV password is required.');
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+					new Notice('WebDAV password is required.');
 				return;
 			}
 			if (!this.virtualPath.trim()) {

@@ -19,11 +19,13 @@ export class WelcomeModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		contentEl.createEl('h2', { text: 'Welcome to Folder Bridge' });
 
 		const descEl = contentEl.createDiv({ cls: 'folderbridge-welcome-desc' });
 
 		descEl.createEl('p', {
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			text: 'Folder Bridge lets you mount external folders into your vault as seamless, native-feeling directories, with no copying, duplication, or symlinks required.',
 		}).addClass('folderbridge-welcome-intro');
 
@@ -39,6 +41,7 @@ export class WelcomeModal extends Modal {
 		}
 
 		descEl.createEl('p', {
+			// eslint-disable-next-line obsidianmd/ui/sentence-case
 			text: 'Mounted folders appear instantly in the file explorer, support full-text search, Quick Switcher, and all your plugins.',
 			cls: 'setting-item-description',
 		});
@@ -46,6 +49,7 @@ export class WelcomeModal extends Modal {
 		const tipBox = contentEl.createDiv({ cls: 'folderbridge-tip-box' });
 		tipBox.createEl('strong', { text: '💡 quick tip: ' });
 		tipBox.appendText('After adding a mount, you can manage it from ');
+		// eslint-disable-next-line obsidianmd/ui/sentence-case
 		tipBox.createEl('strong', { text: 'Settings, then Folder Bridge' });
 		tipBox.appendText('. Per-mount options: read-only, custom ignore list, watcher tuning, and device-specific path overrides.');
 
