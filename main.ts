@@ -2669,12 +2669,12 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 				text: 'Fallback TOC path: ',
 				cls: 'setting-item-description',
 			});
-			fallbackLabel.style.whiteSpace = 'nowrap';
+			fallbackLabel.classList.add('folderbridge-nowrap');
 			const fallbackInput = fallbackRow.createEl('input', {
 				type: 'text',
 				placeholder: 'Alternative path for this platform (e.g. /home/me/folderbridge.managed.json)',
 			});
-			fallbackInput.style.flex = '1';
+			fallbackInput.classList.add('folderbridge-input-flex');
 			fallbackInput.value = this.plugin.settings.managedTocSourceFallback ?? '';
 			const fallbackBrowseBtn = fallbackRow.createEl('button', { text: 'Browse…' });
 			fallbackBrowseBtn.onclick = () => {
@@ -3057,7 +3057,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 		const addOverridePathButton = (): void => {
 			setting.addButton(btn => btn
 				.setButtonText('Set path for this device')
-				.setTooltip('Set the real folder path for this mount on this device (e.g. after moving from Windows to Linux)')
+				.setTooltip(`Set the real folder path for this mount on this device (e.g. after moving from Windows to Linux)`)
 				.onClick(() => {
 					void (async () => {
 						const newPath = await browseFolderOnDisk('Select real folder for this device');
