@@ -16,6 +16,8 @@ export interface MountScanDependencies {
     yieldToEventLoop?(this: void): Promise<void>;
     /** Called after each folder or file is successfully notified to the vault. */
     onEntryScanned?(entry: { path: string; type: 'file' | 'folder'; mtime?: number; size?: number }): void;
+    /** Return true to abort the scan immediately (e.g. on plugin unload). */
+    isCancelled?(): boolean;
 }
 
 export interface MountScanResult {
@@ -54,6 +56,7 @@ export async function replayMountContentsToVault(
 
     const recursivelyNotifyVault = async (folderPath: string): Promise<void> => {
         if (scanLimitHit) return;
+        if (deps.isCancelled?.()) return;
 
         try {
             const list = await deps.list(folderPath);
@@ -61,6 +64,7 @@ export async function replayMountContentsToVault(
 
             for (const folder of list.folders) {
                 if (scanLimitHit) return;
+                if (deps.isCancelled?.()) return;
 
                 const folderName = folder.split('/').pop() || '';
                 const folderMountRelPath = folder.startsWith(mountVirtualPath + '/')
@@ -86,6 +90,7 @@ export async function replayMountContentsToVault(
 
             for (let i = 0; i < list.files.length; i++) {
                 if (scanLimitHit) break;
+                if (deps.isCancelled?.()) return;
 
                 const file = list.files[i];
                 if (i > 0 && i % 100 === 0) {

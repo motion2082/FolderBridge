@@ -114,6 +114,9 @@ export default class FolderBridgePlugin extends Plugin {
 	/** Directory holding per-mount scan cache files. */
 	private scanCacheDir: string | null = null;
 
+	/** Set to true on unload so background scans stop calling vault.onChange immediately. */
+	private unloading = false;
+
 	isTocManagedMount(mount: MountPoint): boolean {
 		return typeof mount.tocSourcePath === 'string' && mount.tocSourcePath.length > 0;
 	}
@@ -1017,6 +1020,9 @@ export default class FolderBridgePlugin extends Plugin {
 			(this.app as App & AppInternal).openWithDefaultApp = this.originalOpenWithDefaultApp as (filePath: string) => void;
 			this.originalOpenWithDefaultApp = null;
 		}
+
+		// Signal all background scans to stop immediately
+		this.unloading = true;
 
 		// Stop the localhost streaming server
 		this.fileServer.stop();
@@ -1929,6 +1935,7 @@ export default class FolderBridgePlugin extends Plugin {
 				logger.debug(`Folder Bridge: Failed to list ${folderPath}`, error);
 			},
 			onEntryScanned,
+			isCancelled: () => this.unloading,
 		});
 		notice.hide();
 		if (scanLimitHit) {
