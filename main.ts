@@ -893,6 +893,20 @@ export default class FolderBridgePlugin extends Plugin {
 					if (!isCacheFresh(mountCache, maxAge)) continue;
 
 					const vault = this.app.vault as typeof this.app.vault & VaultInternal;
+
+					// Create the mount root (and any intermediate path segments) before
+					// replaying cache entries. Without this, Obsidian may auto-create the
+					// parent folder from disk as a hidden "real" folder, causing
+					// notifyVaultMountAdded to skip the mount injection entirely.
+					const segments = normalizePath(mount.virtualPath).split('/');
+					for (let i = 1; i <= segments.length; i++) {
+						const partPath = segments.slice(0, i).join('/');
+						if (this.app.vault.getAbstractFileByPath(partPath)) continue;
+						try {
+							await vault.onChange('folder-created', partPath, null, null);
+						} catch { /* vault.onChange not available */ }
+					}
+
 					await replayCacheToVault(mountCache, {
 						hasAbstractFile: (p) => !!this.app.vault.getAbstractFileByPath(p),
 						onFolderCreated: (p) => vault.onChange('folder-created', p, null, null),
