@@ -1024,6 +1024,17 @@ export default class FolderBridgePlugin extends Plugin {
 		// Signal all background scans to stop immediately
 		this.unloading = true;
 
+		// Unregister all virtual files from Obsidian's index before unloading.
+		// This prevents ghost entries in Obsidian's metadata store when the plugin
+		// is disabled or Obsidian is closed mid-scan, which would cause Obsidian
+		// to get stuck at "Loading cache..." on the next startup.
+		const activeMounts = this.settings.mountPoints.filter(
+			m => m.enabled && this.isMountEnabledOnThisDevice(m)
+		);
+		void Promise.all(
+			activeMounts.map(mount => this.notifyVaultMountRemoved(mount).catch(() => { /* best-effort */ }))
+		);
+
 		// Stop the localhost streaming server
 		this.fileServer.stop();
 
