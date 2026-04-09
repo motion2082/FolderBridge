@@ -14,11 +14,6 @@ export interface MountScanCache {
     entries: CachedEntry[];
 }
 
-export interface ScanCacheFile {
-    version: 1;
-    mounts: MountScanCache[];
-}
-
 export interface ReplayCacheDeps {
     hasAbstractFile(path: string): boolean;
     onFolderCreated(path: string): Promise<void>;
@@ -29,20 +24,25 @@ export function isCacheFresh(mountCache: MountScanCache, maxAgeMs: number): bool
     return Date.now() - mountCache.savedAt < maxAgeMs;
 }
 
-export async function loadScanCache(
+export function getMountCachePath(cacheDir: string, mountId: string): string {
+    return normalizePath(`${cacheDir}/scan-cache-${mountId}.json`);
+}
+
+export async function loadMountCache(
     adapter: DataAdapter,
-    cachePath: string,
-): Promise<ScanCacheFile | null> {
+    cacheDir: string,
+    mountId: string,
+): Promise<MountScanCache | null> {
     try {
-        const raw = await adapter.read(cachePath);
+        const raw = await adapter.read(getMountCachePath(cacheDir, mountId));
         const parsed = JSON.parse(raw) as unknown;
         if (
             typeof parsed === 'object' &&
             parsed !== null &&
-            (parsed as ScanCacheFile).version === 1 &&
-            Array.isArray((parsed as ScanCacheFile).mounts)
+            typeof (parsed as MountScanCache).mountId === 'string' &&
+            Array.isArray((parsed as MountScanCache).entries)
         ) {
-            return parsed as ScanCacheFile;
+            return parsed as MountScanCache;
         }
         return null;
     } catch {
@@ -50,12 +50,25 @@ export async function loadScanCache(
     }
 }
 
-export async function saveScanCache(
+export async function saveMountCache(
     adapter: DataAdapter,
-    cachePath: string,
-    cache: ScanCacheFile,
+    cacheDir: string,
+    mountId: string,
+    cache: MountScanCache,
 ): Promise<void> {
-    await adapter.write(cachePath, JSON.stringify(cache));
+    await adapter.write(getMountCachePath(cacheDir, mountId), JSON.stringify(cache));
+}
+
+export async function deleteMountCache(
+    adapter: DataAdapter,
+    cacheDir: string,
+    mountId: string,
+): Promise<void> {
+    try {
+        await adapter.remove(getMountCachePath(cacheDir, mountId));
+    } catch {
+        // File may not exist; ignore
+    }
 }
 
 /**

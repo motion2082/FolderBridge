@@ -20,7 +20,7 @@ import { SFTPAdapter } from './src/SFTPAdapter';
 import { logger } from './src/logger';
 import { loadOptionalNodeModule } from './src/runtimeNode';
 import { replayMountContentsToVault } from './src/mountScan';
-import { CachedEntry, ScanCacheFile, isCacheFresh, loadScanCache, replayCacheToVault, saveScanCache } from './src/scanCache';
+import { CachedEntry, isCacheFresh, loadMountCache, saveMountCache, deleteMountCache, replayCacheToVault } from './src/scanCache';
 import { parseTocConfig, serializeTocConfig } from './src/TocConfig';
 
 // Lazy-loaded Node.js builtins — safe on Obsidian Mobile (Capacitor).
@@ -111,9 +111,8 @@ export default class FolderBridgePlugin extends Plugin {
 	mountHealthMap = new Map<string, boolean>();
 	private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
 
-	/** Persistent scan cache — speeds up subsequent startups for large mounts. */
-	private scanCachePath: string | null = null;
-	private scanCacheData: ScanCacheFile | null = null;
+	/** Directory holding per-mount scan cache files. */
+	private scanCacheDir: string | null = null;
 
 	isTocManagedMount(mount: MountPoint): boolean {
 		return typeof mount.tocSourcePath === 'string' && mount.tocSourcePath.length > 0;
@@ -561,8 +560,8 @@ export default class FolderBridgePlugin extends Plugin {
 			this.updateStatusBar();
 		}
 
-		this.scanCachePath = normalizePath(
-			`${this.app.vault.configDir}/plugins/folderbridge/scan-cache.json`
+		this.scanCacheDir = normalizePath(
+			`${this.app.vault.configDir}/plugins/folderbridge`
 		);
 
 		// Settings tab
@@ -871,22 +870,16 @@ export default class FolderBridgePlugin extends Plugin {
 				// Start background reachability checks — doesn't depend on scan state
 				this.startHealthChecks();
 
-				// Load persistent scan cache and do an instant vault replay for each
-				// mount whose cached tree is still fresh. The background scan below then
-				// only fires vault.onChange for genuinely new/changed entries.
-				if (this.scanCachePath) {
-					this.scanCacheData = await loadScanCache(this.app.vault.adapter, this.scanCachePath);
-				}
-				if (!this.scanCacheData) {
-					this.scanCacheData = { version: 1, mounts: [] };
-				}
-
+				// Load each mount's cache file independently and do an instant vault
+				// replay for mounts whose cached tree is still fresh. The background
+				// scan below then only fires vault.onChange for new/changed entries.
 				// 24 hours for local mounts; 1 hour for cloud mounts.
 				const LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 				const CLOUD_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 
 				for (const mount of activeMounts) {
-					const mountCache = this.scanCacheData.mounts.find(c => c.mountId === mount.id);
+					if (!this.scanCacheDir) continue;
+					const mountCache = await loadMountCache(this.app.vault.adapter, this.scanCacheDir, mount.id);
 					if (!mountCache) continue;
 					const isCloud = ['webdav', 's3', 'sftp'].includes(mount.mountType ?? '');
 					const maxAge = isCloud ? CLOUD_CACHE_MAX_AGE_MS : LOCAL_CACHE_MAX_AGE_MS;
@@ -917,9 +910,8 @@ export default class FolderBridgePlugin extends Plugin {
 				// Fire all mount scans concurrently without blocking startup.
 				// notifyVaultMountAdded is idempotent (hasAbstractFile guards every
 				// vault.onChange call), so concurrent scans are safe.
-				// After each scan, accumulate the discovered entries and persist the cache.
-				const scanCacheData = this.scanCacheData;
-				const scanCachePath = this.scanCachePath;
+				// After each scan, save only that mount's cache file.
+				const scanCacheDir = this.scanCacheDir;
 				const vaultAdapter = this.app.vault.adapter;
 
 				const scanPromises = activeMounts.map(mount => {
@@ -930,21 +922,13 @@ export default class FolderBridgePlugin extends Plugin {
 						logger.error(`Folder Bridge: Startup scan failed for "${mount.virtualPath}"`, err);
 						new Notice(`Folder Bridge: startup scan failed for "${mount.virtualPath}". Check the developer console.`);
 					}).finally(() => {
-						if (scannedEntries.length === 0 || !scanCachePath) return;
-						// Update the in-memory cache for this mount
-						const existingIdx = scanCacheData.mounts.findIndex(c => c.mountId === mount.id);
-						const mountCache = {
+						if (scannedEntries.length === 0 || !scanCacheDir) return;
+						void saveMountCache(vaultAdapter, scanCacheDir, mount.id, {
 							mountId: mount.id,
 							virtualPath: mount.virtualPath,
 							savedAt: Date.now(),
 							entries: scannedEntries,
-						};
-						if (existingIdx >= 0) {
-							scanCacheData.mounts[existingIdx] = mountCache;
-						} else {
-							scanCacheData.mounts.push(mountCache);
-						}
-						void saveScanCache(vaultAdapter, scanCachePath, scanCacheData);
+						});
 					});
 				});
 				void Promise.all(scanPromises);
@@ -1027,10 +1011,6 @@ export default class FolderBridgePlugin extends Plugin {
 		// Stop the localhost streaming server
 		this.fileServer.stop();
 
-		// Best-effort flush of the scan cache
-		if (this.scanCacheData && this.scanCachePath) {
-			void saveScanCache(this.app.vault.adapter, this.scanCachePath, this.scanCacheData);
-		}
 
 		logger.debug('Folder Bridge Unloaded');
 	}
@@ -1603,10 +1583,9 @@ export default class FolderBridgePlugin extends Plugin {
 		this.syncEffectiveMountState();
 		this.updateStatusBar();
 
-		// Evict the removed mount from the persistent scan cache
-		if (this.scanCacheData && this.scanCachePath) {
-			this.scanCacheData.mounts = this.scanCacheData.mounts.filter(c => c.mountId !== mount.id);
-			void saveScanCache(this.app.vault.adapter, this.scanCachePath, this.scanCacheData);
+		// Delete the removed mount's cache file
+		if (this.scanCacheDir) {
+			void deleteMountCache(this.app.vault.adapter, this.scanCacheDir, mount.id);
 		}
 
 		new Notice(`Folder Bridge: Removed mount "${mount.virtualPath}".`);
