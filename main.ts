@@ -873,9 +873,15 @@ export default class FolderBridgePlugin extends Plugin {
 				// Load each mount's cache file independently and do an instant vault
 				// replay for mounts whose cached tree is still fresh. The background
 				// scan below then only fires vault.onChange for new/changed entries.
+				//
+				// Large mounts (photos, movies, etc.) skip the cache replay entirely —
+				// the background scan handles them without blocking Obsidian startup.
+				// Small mounts get instant appearance via the cache replay.
+				//
 				// 24 hours for local mounts; 1 hour for cloud mounts.
 				const LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 				const CLOUD_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
+				const LARGE_MOUNT_ENTRY_THRESHOLD = 5000;
 
 				for (const mount of activeMounts) {
 					if (!this.scanCacheDir) continue;
@@ -884,6 +890,10 @@ export default class FolderBridgePlugin extends Plugin {
 					const isCloud = ['webdav', 's3', 'sftp'].includes(mount.mountType ?? '');
 					const maxAge = isCloud ? CLOUD_CACHE_MAX_AGE_MS : LOCAL_CACHE_MAX_AGE_MS;
 					if (!isCacheFresh(mountCache, maxAge)) continue;
+
+					// Large mounts: skip cache replay, let background scan populate async.
+					// This keeps Obsidian startup fast regardless of mount size.
+					if (mountCache.entries.length > LARGE_MOUNT_ENTRY_THRESHOLD) continue;
 
 					const vault = this.app.vault as typeof this.app.vault & VaultInternal;
 
