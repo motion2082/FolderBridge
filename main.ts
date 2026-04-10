@@ -1,4 +1,4 @@
-import { App, DataAdapter, DataWriteOptions, FuzzySuggestModal, Plugin, PluginSettingTab, Setting, Notice, normalizePath, TFolder, TFile } from 'obsidian';
+import { App, DataAdapter, DataWriteOptions, FuzzySuggestModal, Plugin, PluginSettingTab, Setting, Notice, normalizePath, TAbstractFile, TFolder, TFile } from 'obsidian';
 import { FolderBridgeSettings, MountPoint, DEFAULT_SETTINGS } from './src/types';
 import { PathMapper } from './src/PathMapper';
 import { VirtualAdapter } from './src/VirtualAdapter';
@@ -873,19 +873,69 @@ export default class FolderBridgePlugin extends Plugin {
 				// Start background reachability checks — doesn't depend on scan state
 				this.startHealthChecks();
 
-				// Load each mount's cache file independently and do an instant vault
-				// replay for mounts whose cached tree is still fresh. The background
-				// scan below then only fires vault.onChange for new/changed entries.
-				//
-				// Large mounts (photos, movies, etc.) skip the cache replay entirely —
-				// the background scan handles them without blocking Obsidian startup.
-				// Small mounts get instant appearance via the cache replay.
+				// One-time cleanup: purge stale virtual entries that Obsidian
+				// loaded from IndexedDB.  Previous plugin versions used
+				// vault.onChange('file-created') which wrote to IDB; if Obsidian
+				// was closed mid-scan those entries persist and slow startup.
+				// Since the plugin hasn't injected anything yet at this point,
+				// any TFolder/TFile under a mount's virtualPath is a stale IDB
+				// remnant — remove it from both fileMap and IDB.
+				{
+					const vaultInternal = this.app.vault as typeof this.app.vault & VaultInternal;
+					const fileMap = this.getFileMap();
+					for (const mount of activeMounts) {
+						const nPath = normalizePath(mount.virtualPath);
+						const staleRoot = this.app.vault.getAbstractFileByPath(nPath);
+						if (!(staleRoot instanceof TFolder) || !fileMap) continue;
+
+						// Collect all stale entries (children before parents)
+						const staleEntries: { path: string; isFolder: boolean }[] = [];
+						const collectStale = (folder: TFolder): void => {
+							for (const child of [...folder.children]) {
+								if (child instanceof TFolder) collectStale(child);
+								staleEntries.push({ path: child.path, isFolder: child instanceof TFolder });
+							}
+						};
+						collectStale(staleRoot);
+						staleEntries.push({ path: nPath, isFolder: true });
+
+						// Fire vault.onChange('*-removed') to queue IDB deletions,
+						// then clear fileMap so the scan starts fresh.
+						if (typeof vaultInternal.onChange === 'function') {
+							for (const e of staleEntries) {
+								void vaultInternal.onChange(
+									e.isFolder ? 'folder-removed' : 'file-removed',
+									e.path, null, null,
+								);
+							}
+						}
+						for (const e of staleEntries) {
+							delete fileMap[e.path];
+						}
+						if (staleRoot.parent) {
+							const idx = staleRoot.parent.children.indexOf(staleRoot);
+							if (idx !== -1) staleRoot.parent.children.splice(idx, 1);
+						}
+						if (staleEntries.length > 1) {
+							logger.debug(`Folder Bridge: Purged ${staleEntries.length} stale IDB entries under "${nPath}"`);
+						}
+					}
+				}
+
+				// Cache replay strategy:
+				//   Small mounts (≤ threshold): replay synchronously so files appear
+				//   instantly in the file explorer before background scans start.
+				//   Large mounts (> threshold): replay is deferred into the background
+				//   scan promise below, where it runs before the filesystem walk so the
+				//   scan can skip already-known entries via hasAbstractFile.
 				//
 				// 24 hours for local mounts; 1 hour for cloud mounts.
 				const LOCAL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 				const CLOUD_CACHE_MAX_AGE_MS = 60 * 60 * 1000;
 				const LARGE_MOUNT_ENTRY_THRESHOLD = 5000;
 
+				// Collect caches once so scan promises can reuse them without re-reading disk.
+				const mountCacheMap = new Map<string, ReturnType<typeof loadMountCache> extends Promise<infer T> ? T : never>();
 				for (const mount of activeMounts) {
 					if (!this.scanCacheDir) continue;
 					const mountCache = await loadMountCache(this.app.vault.adapter, this.scanCacheDir, mount.id);
@@ -893,44 +943,62 @@ export default class FolderBridgePlugin extends Plugin {
 					const isCloud = ['webdav', 's3', 'sftp'].includes(mount.mountType ?? '');
 					const maxAge = isCloud ? CLOUD_CACHE_MAX_AGE_MS : LOCAL_CACHE_MAX_AGE_MS;
 					if (!isCacheFresh(mountCache, maxAge)) continue;
+					mountCacheMap.set(mount.id, mountCache);
+				}
 
-					// Large mounts: skip cache replay, let background scan populate async.
-					// This keeps Obsidian startup fast regardless of mount size.
-					if (mountCache.entries.length > LARGE_MOUNT_ENTRY_THRESHOLD) continue;
-
-					const vault = this.app.vault as typeof this.app.vault & VaultInternal;
-
-					// Create the mount root (and any intermediate path segments) before
-					// replaying cache entries. Without this, Obsidian may auto-create the
-					// parent folder from disk as a hidden "real" folder, causing
-					// notifyVaultMountAdded to skip the mount injection entirely.
+				const createMountRoot = (mount: MountPoint) => {
 					const segments = normalizePath(mount.virtualPath).split('/');
 					for (let i = 1; i <= segments.length; i++) {
 						const partPath = segments.slice(0, i).join('/');
-						if (this.app.vault.getAbstractFileByPath(partPath)) continue;
-						try {
-							await vault.onChange('folder-created', partPath, null, null);
-						} catch { /* vault.onChange not available */ }
+						this.injectVirtualFolder(partPath);
 					}
+				};
 
+				// Instant sync replay for small mounts only.
+				let replayedAny = false;
+				for (const mount of activeMounts) {
+					const mountCache = mountCacheMap.get(mount.id);
+					if (!mountCache || mountCache.entries.length > LARGE_MOUNT_ENTRY_THRESHOLD) continue;
+
+					createMountRoot(mount);
 					await replayCacheToVault(mountCache, {
 						hasAbstractFile: (p) => !!this.app.vault.getAbstractFileByPath(p),
-						onFolderCreated: (p) => vault.onChange('folder-created', p, null, null),
-						onFileCreated: (p) => vault.onChange('file-created', p, null, null),
+						onFolderCreated: (p) => { if (!this.unloading) this.injectVirtualFolder(p); return Promise.resolve(); },
+						onFileCreated: (p) => { if (!this.unloading) this.injectVirtualFile(p); return Promise.resolve(); },
 					});
+					replayedAny = true;
 				}
+				if (replayedAny) this.refreshFileExplorer();
 
 				// Fire all mount scans concurrently without blocking startup.
 				// notifyVaultMountAdded is idempotent (hasAbstractFile guards every
-				// vault.onChange call), so concurrent scans are safe.
+				// entry), so concurrent scans are safe.
+				// Large mounts replay their cache first (in background) before the
+				// filesystem walk so previously-known entries are skipped efficiently.
 				// After each scan, save only that mount's cache file.
 				const scanCacheDir = this.scanCacheDir;
 				const vaultAdapter = this.app.vault.adapter;
 
-				const scanPromises = activeMounts.map(mount => {
+				const scanPromises = activeMounts.map(async (mount) => {
+					// Large mounts: replay cache in background before filesystem scan.
+					// This restores files from cache quickly without blocking startup,
+					// and lets the scan skip already-known entries via hasAbstractFile.
+					const mountCache = mountCacheMap.get(mount.id);
+					if (mountCache && mountCache.entries.length > LARGE_MOUNT_ENTRY_THRESHOLD) {
+						createMountRoot(mount);
+						await replayCacheToVault(mountCache, {
+							hasAbstractFile: (p) => !!this.app.vault.getAbstractFileByPath(p),
+							onFolderCreated: (p) => { if (!this.unloading) this.injectVirtualFolder(p); return Promise.resolve(); },
+							onFileCreated: (p) => { if (!this.unloading) this.injectVirtualFile(p); return Promise.resolve(); },
+						});
+						this.refreshFileExplorer();
+					}
+
 					const scannedEntries: CachedEntry[] = [];
-					return this.notifyVaultMountAdded(mount, (entry) => {
+					return this.notifyVaultMountAdded(mount, true, (entry) => {
 						scannedEntries.push(entry);
+					}).then(() => {
+						this.refreshFileExplorer();
 					}).catch((err: unknown) => {
 						logger.error(`Folder Bridge: Startup scan failed for "${mount.virtualPath}"`, err);
 						new Notice(`Folder Bridge: startup scan failed for "${mount.virtualPath}". Check the developer console.`);
@@ -1024,16 +1092,33 @@ export default class FolderBridgePlugin extends Plugin {
 		// Signal all background scans to stop immediately
 		this.unloading = true;
 
-		// Unregister all virtual files from Obsidian's index before unloading.
-		// This prevents ghost entries in Obsidian's metadata store when the plugin
-		// is disabled or Obsidian is closed mid-scan, which would cause Obsidian
-		// to get stuck at "Loading cache..." on the next startup.
+		// Remove all virtual entries from Obsidian's in-memory vault tree.
+		// Since we use injectVirtual{Folder,File} which bypasses IDB entirely,
+		// there are no stale IDB entries to clean up — just clear fileMap.
+		const fileMap = this.getFileMap();
 		const activeMounts = this.settings.mountPoints.filter(
 			m => m.enabled && this.isMountEnabledOnThisDevice(m)
 		);
-		void Promise.all(
-			activeMounts.map(mount => this.notifyVaultMountRemoved(mount).catch(() => { /* best-effort */ }))
-		);
+
+		for (const mount of activeMounts) {
+			const nPath = normalizePath(mount.virtualPath);
+			const mountFolder = this.app.vault.getAbstractFileByPath(nPath);
+			if (!(mountFolder instanceof TFolder) || !fileMap) continue;
+
+			const purge = (folder: TFolder): void => {
+				for (const child of [...folder.children]) {
+					if (child instanceof TFolder) purge(child);
+					delete fileMap[child.path];
+				}
+				folder.children.length = 0;
+			};
+			purge(mountFolder);
+			delete fileMap[nPath];
+			if (mountFolder.parent) {
+				const idx = mountFolder.parent.children.indexOf(mountFolder);
+				if (idx !== -1) mountFolder.parent.children.splice(idx, 1);
+			}
+		}
 
 		// Stop the localhost streaming server
 		this.fileServer.stop();
@@ -1045,6 +1130,99 @@ export default class FolderBridgePlugin extends Plugin {
 	// ------------------------------------------------------------------
 	// Helpers
 	// ------------------------------------------------------------------
+
+	/**
+	 * Return Obsidian's internal fileMap (path → TAbstractFile).
+	 * Works across Obsidian versions that use either `fileMap` or
+	 * `abstractFilesInPath` as the internal property name.
+	 */
+	private getFileMap(): Record<string, TAbstractFile> | undefined {
+		const vaultAny = this.app.vault as unknown as Record<string, unknown>;
+		return (vaultAny['fileMap'] ?? vaultAny['abstractFilesInPath']) as
+			| Record<string, TAbstractFile>
+			| undefined;
+	}
+
+	/**
+	 * Add a virtual folder to Obsidian's in-memory vault tree WITHOUT
+	 * writing to IndexedDB or firing events.  Call refreshFileExplorer()
+	 * once after a batch of injections to update the UI.
+	 */
+	private injectVirtualFolder(folderPath: string): void {
+		if (this.app.vault.getAbstractFileByPath(folderPath)) return;
+		const fileMap = this.getFileMap();
+		if (!fileMap) return;
+
+		const folder = Object.create(TFolder.prototype);
+		if (!(folder instanceof TFolder)) return;
+		const name = folderPath.split('/').pop() || folderPath;
+		const parentPath = folderPath.substring(0, folderPath.lastIndexOf('/'));
+		const parent: TFolder = parentPath
+			? (this.app.vault.getAbstractFileByPath(parentPath) as TFolder | null) ?? this.app.vault.getRoot()
+			: this.app.vault.getRoot();
+
+		Object.assign(folder, {
+			path: folderPath,
+			name,
+			vault: this.app.vault,
+			children: [],
+			parent,
+		});
+
+		if (parent.children) parent.children.push(folder);
+		fileMap[folderPath] = folder;
+		this.app.vault.trigger('create', folder);
+	}
+
+	/**
+	 * Add a virtual file to Obsidian's in-memory vault tree WITHOUT
+	 * writing to IndexedDB or firing events.
+	 */
+	private injectVirtualFile(
+		filePath: string,
+		stat?: { type?: string; ctime: number; mtime: number; size: number } | null,
+	): void {
+		if (this.app.vault.getAbstractFileByPath(filePath)) return;
+		const fileMap = this.getFileMap();
+		if (!fileMap) return;
+
+		const file = Object.create(TFile.prototype);
+		if (!(file instanceof TFile)) return;
+		const name = filePath.split('/').pop() || filePath;
+		const dotIdx = name.lastIndexOf('.');
+		const parentPath = filePath.substring(0, filePath.lastIndexOf('/'));
+		const parent: TFolder = parentPath
+			? (this.app.vault.getAbstractFileByPath(parentPath) as TFolder | null) ?? this.app.vault.getRoot()
+			: this.app.vault.getRoot();
+
+		Object.assign(file, {
+			path: filePath,
+			name,
+			basename: dotIdx > 0 ? name.substring(0, dotIdx) : name,
+			extension: dotIdx > 0 ? name.substring(dotIdx + 1) : '',
+			vault: this.app.vault,
+			stat: stat
+				? { ctime: stat.ctime, mtime: stat.mtime, size: stat.size }
+				: { ctime: 0, mtime: 0, size: 0 },
+			parent,
+		});
+
+		if (parent.children) parent.children.push(file);
+		fileMap[filePath] = file;
+	}
+
+	/**
+	 * Force the file explorer to rebuild its tree from the current vault
+	 * fileMap.  Call once after a batch of injectVirtual* operations.
+	 */
+	private refreshFileExplorer(): void {
+		// Obsidian's file explorer rebuilds when it receives a 'resolve'
+		// event or when the root is sorted. 
+		this.app.metadataCache.trigger('resolve');
+		this.app.vault.trigger('resolved');
+		
+		this.app.workspace.trigger('layout-change');
+	}
 
 	private ignoreCache = new Map<string, { nameStrings: string[], pathStrings: string[], regexes: RegExp[] }>();
 
@@ -1366,8 +1544,12 @@ export default class FolderBridgePlugin extends Plugin {
 				// File may already have been written by the failed vault.create() above.
 			}
 			const stat = await vault.adapter.stat(nPath);
-			if (stat && typeof vault.onChange === 'function' && !this.app.vault.getAbstractFileByPath(nPath)) {
-				await vault.onChange('file-created', nPath, null, stat);
+			if (stat && !this.app.vault.getAbstractFileByPath(nPath)) {
+				this.injectVirtualFile(nPath, stat);
+				// Single file created by user action — fire event so the
+				// editor tab appears immediately.  Bulk scans skip this.
+				const newFile = this.app.vault.getAbstractFileByPath(nPath);
+				if (newFile) this.app.vault.trigger('create', newFile);
 			}
 			const created = this.app.vault.getAbstractFileByPath(nPath);
 			return created instanceof TFile ? created : null;
@@ -1395,8 +1577,10 @@ export default class FolderBridgePlugin extends Plugin {
 				// File may already have been written by the failed vault.createBinary().
 			}
 			const stat = await vault.adapter.stat(nPath);
-			if (stat && typeof vault.onChange === 'function' && !this.app.vault.getAbstractFileByPath(nPath)) {
-				await vault.onChange('file-created', nPath, null, stat);
+			if (stat && !this.app.vault.getAbstractFileByPath(nPath)) {
+				this.injectVirtualFile(nPath, stat);
+				const newFile = this.app.vault.getAbstractFileByPath(nPath);
+				if (newFile) this.app.vault.trigger('create', newFile);
 			}
 			const createdBin = this.app.vault.getAbstractFileByPath(nPath);
 			return createdBin instanceof TFile ? createdBin : null;
@@ -1901,90 +2085,66 @@ export default class FolderBridgePlugin extends Plugin {
 	 */
 	async notifyVaultMountAdded(
 		mount: MountPoint,
+		silentNotice: boolean = false,
 		onEntryScanned?: (entry: { path: string; type: 'file' | 'folder'; mtime?: number; size?: number }) => void,
 	): Promise<void> {
 		// Resolve primary vs fallback path before any I/O so PathMapper
 		// returns the correct real path for all subsequent operations.
 		await this.resolveMountPath(mount);
 
-		const vault = this.app.vault as typeof this.app.vault & VaultInternal;
-
-		if (typeof vault.onChange !== 'function') {
-			logger.debug("vault.onChange is not a function!");
-			return;
-		}
-
 		// Walk every path segment so intermediate virtual folders also appear
 		// (e.g. mounting "Projects/Work" also surfaces the "Projects" folder).
 		const segments = normalizePath(mount.virtualPath).split('/');
 		for (let i = 1; i <= segments.length; i++) {
 			const partPath = segments.slice(0, i).join('/');
-			// Skip segments Obsidian already knows about
-			if (this.app.vault.getAbstractFileByPath(partPath)) continue;
-			try {
-				await vault.onChange('folder-created', partPath, null, null);
-			} catch (e) {
-				logger.debug('Folder Bridge: vault.onChange(folder-created) unavailable', e);
-			}
+			this.injectVirtualFolder(partPath);
 		}
 
 		// Recursively notify Obsidian about all files and folders inside the mount
 		const suppressionEnabled = !!mount.watcherSuppressAllEvents;
 
-		const notice = new Notice(`Folder Bridge: Scanning and mounting "${mount.virtualPath}"...`, 0);
+		const mountLabel = mount.virtualPath.split('/').pop() || mount.virtualPath;
+		const notice = silentNotice ? null : new Notice(`Folder Bridge: Scanning "${mountLabel}"... 0 items`, 0);
+		let scanCount = 0;
 		const { fileCount, folderCount, scanLimitHit } = await replayMountContentsToVault(mount, {
 			list: (folderPath) => this.app.vault.adapter.list(folderPath),
 			stat: (filePath) => this.app.vault.adapter.stat(filePath),
 			hasAbstractFile: (path) => !!this.app.vault.getAbstractFileByPath(path),
 			isIgnored: (name, activeMount, mountRelativePath) => this.isNameIgnored(name, activeMount, mountRelativePath),
-			onFolderCreated: (path) => vault.onChange('folder-created', path, null, null),
-			onFileCreated: (path, stat) => vault.onChange('file-created', path, null, stat),
+			onFolderCreated: (path) => { if (!this.unloading) this.injectVirtualFolder(path); return Promise.resolve(); },
+			onFileCreated: (path, stat) => { if (!this.unloading) this.injectVirtualFile(path, stat); return Promise.resolve(); },
 			onHugeMount: () => {
-				new Notice(`Folder Bridge: "${mount.virtualPath}" is very large. This may take a moment...`);
+				// No separate notice needed — count in the progress notice is already visible
 			},
 			onError: (folderPath, error) => {
 				logger.debug(`Folder Bridge: Failed to list ${folderPath}`, error);
 			},
-			onEntryScanned,
+			onEntryScanned: (entry) => {
+				scanCount++;
+				if (scanCount % 100 === 0) {
+					if (notice) notice.setMessage(`Folder Bridge: Scanning "${mountLabel}"... ${scanCount.toLocaleString()} items`);
+				}
+				onEntryScanned?.(entry);
+			},
 			isCancelled: () => this.unloading,
 		});
-		notice.hide();
+		if (notice) notice.hide();
 		if (scanLimitHit) {
 			const scanLimit = mount.maxFiles ?? 0;
-			new Notice(
+			if (!silentNotice) new Notice(
 				`Folder Bridge: Scan limit (${scanLimit.toLocaleString()} items) reached for "${mount.virtualPath}". ` +
 				`Increase "Max files" in mount advanced settings to surface more.`,
 				10000
 			);
 		}
 		if (suppressionEnabled) {
-			new Notice(`Folder Bridge: Mounted "${mount.virtualPath}" with external file events suppressed.`);
+			if (!silentNotice) new Notice(`Folder Bridge: Mounted "${mount.virtualPath}" with external file events suppressed.`);
 		} else {
-			new Notice(`Folder Bridge: Mounted ${folderCount} folders and ${fileCount} files in "${mount.virtualPath}".`);
-			try {
-				await vault.onChange('raw', normalizePath(mount.virtualPath), null, null);
-			} catch (e) {
-				logger.debug('Folder Bridge: vault.onChange(raw) unavailable', e);
-			}
+			if (!silentNotice) new Notice(`Folder Bridge: Mounted ${folderCount} folders and ${fileCount} files in "${mount.virtualPath}".`);
 		}
 
-		// Force the file explorer to refresh the folder contents by expanding and collapsing it
-		if (!suppressionEnabled) setTimeout(() => {
-			const fileExplorerLeaves = this.app.workspace.getLeavesOfType('file-explorer');
-			if (fileExplorerLeaves.length === 0) return;
-
-			type FileExplorerView = { fileItems?: Record<string, { setCollapsed?: (collapsed: boolean) => void }> };
-			const fileExplorerView = fileExplorerLeaves[0].view as unknown as FileExplorerView;
-			const fileItems = fileExplorerView.fileItems;
-
-			const folderPath = normalizePath(mount.virtualPath);
-			if (fileItems && fileItems[folderPath]) {
-				const folderItem = fileItems[folderPath];
-				if (typeof folderItem.setCollapsed === 'function') {
-					folderItem.setCollapsed(false);
-				}
-			}
-		}, 100);
+		// Refresh file explorer so it picks up all injected entries
+		this.refreshFileExplorer();
 
 		// [FEATURE_20260222] Start watching the mount for external changes
 		this.fileWatcher?.startWatching(mount);
@@ -2002,42 +2162,88 @@ export default class FolderBridgePlugin extends Plugin {
 		// [FEATURE_20260222] Stop watching the mount for external changes
 		this.fileWatcher?.stopWatching(mount);
 
-		const vault = this.app.vault as typeof this.app.vault & VaultInternal;
-		if (typeof vault.onChange !== 'function') return;
-
 		const nPath = normalizePath(mount.virtualPath);
 		const mountFolder = this.app.vault.getAbstractFileByPath(nPath);
 		if (!mountFolder) return;
 
-		// Recursively remove all files and folders inside the mount using the
-		// vault's in-memory tree.  This avoids calling adapter.list() (which
-		// routes through VirtualAdapter and makes real FS / network calls) and
-		// therefore prevents the "list: found mount for" log spam, eliminates
-		// unnecessary I/O, and stops the visible file-explorer flicker caused
-		// by the adapter re-enumerating the directory while files are being
-		// removed.
-		const recursivelyRemoveVault = async (folder: TFolder): Promise<void> => {
+		// Fast path: directly remove all entries from Obsidian's internal
+		// fileMap and clear children arrays, then fire a single 'delete' event
+		// for the root.  This avoids firing one vault.onChange per file (which
+		// triggers a file-explorer redraw each time), making removal instant
+		// even for mounts with tens of thousands of files.
+		const vaultAny = this.app.vault as unknown as Record<string, unknown>;
+		const fileMap = (vaultAny['fileMap'] ?? vaultAny['abstractFilesInPath']) as
+			| Record<string, TAbstractFile>
+			| undefined;
+
+		if (fileMap && mountFolder instanceof TFolder) {
+			const purgeFromMap = (folder: TFolder): void => {
+				for (const child of [...folder.children]) {
+					if (child instanceof TFolder) purgeFromMap(child);
+					delete fileMap[child.path];
+				}
+				folder.children.length = 0;
+			};
+			purgeFromMap(mountFolder);
+			delete fileMap[nPath];
+			if (mountFolder.parent) {
+				const idx = mountFolder.parent.children.indexOf(mountFolder);
+				if (idx !== -1) mountFolder.parent.children.splice(idx, 1);
+			}
+			// Single event so the file explorer removes the root from its view
+			this.app.vault.trigger('delete', mountFolder);
+
+			// Walk up and remove any now-empty intermediate segment folders that
+			// were created by FolderBridge for this mount's virtual path.  Stop
+			// at the vault root, at a folder that still has children (real vault
+			// content), or at another mount's own virtual root.
+			const activeMountPaths = new Set(
+				this.settings.mountPoints
+					.filter(m => m.enabled && this.isMountEnabledOnThisDevice(m))
+					.map(m => normalizePath(m.virtualPath)),
+			);
+			let ancestor = mountFolder.parent;
+			while (ancestor && ancestor.path !== '' && ancestor.path !== '/') {
+				if (ancestor.children.length > 0) break;
+				if (activeMountPaths.has(ancestor.path)) break;
+				const grandParent = ancestor.parent;
+				delete fileMap[ancestor.path];
+				if (grandParent) {
+					const idx = grandParent.children.indexOf(ancestor);
+					if (idx !== -1) grandParent.children.splice(idx, 1);
+				}
+				this.app.vault.trigger('delete', ancestor);
+				ancestor = grandParent ?? null;
+			}
+			return;
+		}
+
+		// Fallback for future Obsidian versions where the internal map name
+		// has changed: use vault.onChange batched with UI yields.
+		const vault = this.app.vault as typeof this.app.vault & VaultInternal;
+		if (typeof vault.onChange !== 'function') return;
+
+		const entries: { path: string; isFolder: boolean }[] = [];
+		const collectEntries = (folder: TFolder): void => {
 			for (const child of [...folder.children]) {
 				if (child instanceof TFolder) {
-					await recursivelyRemoveVault(child);
-					logger.debug(`[FolderBridge] Removing folder from UI: ${child.path}`);
-					await vault.onChange('folder-removed', child.path, null, null);
+					collectEntries(child);
+					entries.push({ path: child.path, isFolder: true });
 				} else {
-					logger.debug(`[FolderBridge] Removing file from UI: ${child.path}`);
-					await vault.onChange('file-removed', child.path, null, null);
+					entries.push({ path: child.path, isFolder: false });
 				}
 			}
 		};
+		if (mountFolder instanceof TFolder) collectEntries(mountFolder);
+		entries.push({ path: nPath, isFolder: true });
 
-		if (mountFolder instanceof TFolder) {
-			await recursivelyRemoveVault(mountFolder);
-		}
-
-		try {
-			logger.debug(`[FolderBridge] Removing root mount folder from UI: ${nPath}`);
-			await vault.onChange('folder-removed', nPath, null, null);
-		} catch (e) {
-			logger.debug('Folder Bridge: vault.onChange(folder-removed) unavailable', e);
+		const BATCH = 200;
+		for (let i = 0; i < entries.length; i++) {
+			const e = entries[i];
+			void vault.onChange(e.isFolder ? 'folder-removed' : 'file-removed', e.path, null, null);
+			if (i > 0 && i % BATCH === 0) {
+				await new Promise<void>(resolve => setTimeout(resolve, 0));
+			}
 		}
 	}
 
@@ -3078,7 +3284,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 		const addOverridePathButton = (): void => {
 			setting.addButton(btn => btn
 				.setButtonText('Set path for this device')
-				.setTooltip(`Set the real folder path for this mount on this device (e.g. after moving from Windows to Linux)`)
+				.setTooltip(`Set the real folder path for this mount on this device (e.g. after moving from Windows to Linux).`)
 				.onClick(() => {
 					void (async () => {
 						const newPath = await browseFolderOnDisk('Select real folder for this device');
