@@ -1144,9 +1144,28 @@ export default class FolderBridgePlugin extends Plugin {
 	}
 
 	/**
+	 * Cached reference to the file-explorer view, resolved once lazily.
+	 * Type is `unknown` because the FileExplorer view class is internal.
+	 */
+	private _fileExplorerView: { onCreate(f: TAbstractFile): void; requestSort(): void } | null | undefined = undefined;
+
+	private getFileExplorerView(): { onCreate(f: TAbstractFile): void; requestSort(): void } | null {
+		if (this._fileExplorerView !== undefined) return this._fileExplorerView;
+		const leaves = this.app.workspace.getLeavesOfType('file-explorer');
+		const view = leaves[0]?.view as { onCreate?(f: TAbstractFile): void; requestSort?(): void } | undefined;
+		if (view && typeof view.onCreate === 'function' && typeof view.requestSort === 'function') {
+			this._fileExplorerView = view as { onCreate(f: TAbstractFile): void; requestSort(): void };
+		} else {
+			this._fileExplorerView = null;
+		}
+		return this._fileExplorerView;
+	}
+
+	/**
 	 * Add a virtual folder to Obsidian's in-memory vault tree WITHOUT
-	 * writing to IndexedDB or firing events.  Call refreshFileExplorer()
-	 * once after a batch of injections to update the UI.
+	 * writing to IndexedDB.  Notifies the file explorer directly via its
+	 * internal onCreate() so DOM items are created without going through
+	 * vault events (which would trigger MetadataCache → IDB writes).
 	 */
 	private injectVirtualFolder(folderPath: string): void {
 		if (this.app.vault.getAbstractFileByPath(folderPath)) return;
@@ -1171,12 +1190,16 @@ export default class FolderBridgePlugin extends Plugin {
 
 		if (parent.children) parent.children.push(folder);
 		fileMap[folderPath] = folder;
-		this.app.vault.trigger('create', folder);
+
+		// Directly notify the file explorer so it creates a DOM item —
+		// bypasses vault.trigger('create') which would route through
+		// MetadataCache and write to IndexedDB.
+		this.getFileExplorerView()?.onCreate(folder);
 	}
 
 	/**
 	 * Add a virtual file to Obsidian's in-memory vault tree WITHOUT
-	 * writing to IndexedDB or firing events.
+	 * writing to IndexedDB.
 	 */
 	private injectVirtualFile(
 		filePath: string,
@@ -1209,19 +1232,19 @@ export default class FolderBridgePlugin extends Plugin {
 
 		if (parent.children) parent.children.push(file);
 		fileMap[filePath] = file;
+
+		// Same as injectVirtualFolder — direct file-explorer notification,
+		// no vault event, no IDB write.
+		this.getFileExplorerView()?.onCreate(file);
 	}
 
 	/**
-	 * Force the file explorer to rebuild its tree from the current vault
-	 * fileMap.  Call once after a batch of injectVirtual* operations.
+	 * Force the file explorer to sort after a batch of injectVirtual* calls.
+	 * Each individual inject already creates the DOM item via onCreate();
+	 * this call coalesces the sort so the tree renders in order once.
 	 */
 	private refreshFileExplorer(): void {
-		// Obsidian's file explorer rebuilds when it receives a 'resolve'
-		// event or when the root is sorted. 
-		this.app.metadataCache.trigger('resolve');
-		this.app.vault.trigger('resolved');
-		
-		this.app.workspace.trigger('layout-change');
+		this.getFileExplorerView()?.requestSort();
 	}
 
 	private ignoreCache = new Map<string, { nameStrings: string[], pathStrings: string[], regexes: RegExp[] }>();
