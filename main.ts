@@ -1828,6 +1828,9 @@ export default class FolderBridgePlugin extends Plugin {
 		const suppressionEnabled = !!mount.watcherSuppressAllEvents;
 
 		const notice = new Notice(`Folder Bridge: Scanning and mounting "${mount.virtualPath}"...`, 0);
+		const updateNotice = (files: number, folders: number) => {
+			notice.setMessage(`Folder Bridge: Scanning "${mount.virtualPath}"… ${folders} folders, ${files} files`);
+		};
 		const { fileCount, folderCount, scanLimitHit } = await replayMountContentsToVault(mount, {
 			list: (folderPath) => this.app.vault.adapter.list(folderPath),
 			stat: (filePath) => this.app.vault.adapter.stat(filePath),
@@ -1835,8 +1838,9 @@ export default class FolderBridgePlugin extends Plugin {
 			isIgnored: (name, activeMount, mountRelativePath) => this.isNameIgnored(name, activeMount, mountRelativePath),
 			onFolderCreated: (path) => vault.onChange('folder-created', path, null, null),
 			onFileCreated: (path, stat) => vault.onChange('file-created', path, null, stat),
+			onProgress: updateNotice,
 			onHugeMount: () => {
-				new Notice(`Folder Bridge: "${mount.virtualPath}" is very large. This may take a moment...`);
+				notice.setMessage(`Folder Bridge: "${mount.virtualPath}" is very large. This may take a moment…`);
 			},
 			onError: (folderPath, error) => {
 				logger.debug(`Folder Bridge: Failed to list ${folderPath}`, error);
@@ -1903,29 +1907,34 @@ export default class FolderBridgePlugin extends Plugin {
 		const mountFolder = this.app.vault.getAbstractFileByPath(nPath);
 		if (!mountFolder) return;
 
-		// Recursively remove all files and folders inside the mount using the
-		// vault's in-memory tree.  This avoids calling adapter.list() (which
-		// routes through VirtualAdapter and makes real FS / network calls) and
-		// therefore prevents the "list: found mount for" log spam, eliminates
-		// unnecessary I/O, and stops the visible file-explorer flicker caused
-		// by the adapter re-enumerating the directory while files are being
-		// removed.
-		const recursivelyRemoveVault = async (folder: TFolder): Promise<void> => {
+		const removeNotice = new Notice(`Folder Bridge: Removing "${mount.virtualPath}"…`, 0);
+
+		// Collect all file and folder paths from the in-memory vault tree,
+		// then fire all removals in parallel — avoids N sequential async calls
+		// for large mounts. Folders are gathered depth-first (leaves first) so
+		// parents are removed after their children.
+		const filePaths: string[] = [];
+		const folderPaths: string[] = [];
+
+		const collectPaths = (folder: TFolder): void => {
 			for (const child of [...folder.children]) {
 				if (child instanceof TFolder) {
-					await recursivelyRemoveVault(child);
-					logger.debug(`[FolderBridge] Removing folder from UI: ${child.path}`);
-					await vault.onChange('folder-removed', child.path, null, null);
+					collectPaths(child);
+					folderPaths.push(child.path);
 				} else {
-					logger.debug(`[FolderBridge] Removing file from UI: ${child.path}`);
-					await vault.onChange('file-removed', child.path, null, null);
+					filePaths.push(child.path);
 				}
 			}
 		};
 
 		if (mountFolder instanceof TFolder) {
-			await recursivelyRemoveVault(mountFolder);
+			collectPaths(mountFolder);
 		}
+
+		logger.debug(`[FolderBridge] Removing ${filePaths.length} files and ${folderPaths.length} folders from UI`);
+
+		await Promise.all(filePaths.map(p => vault.onChange('file-removed', p, null, null)));
+		await Promise.all(folderPaths.map(p => vault.onChange('folder-removed', p, null, null)));
 
 		try {
 			logger.debug(`[FolderBridge] Removing root mount folder from UI: ${nPath}`);
@@ -1933,6 +1942,7 @@ export default class FolderBridgePlugin extends Plugin {
 		} catch (e) {
 			logger.debug('Folder Bridge: vault.onChange(folder-removed) unavailable', e);
 		}
+		removeNotice.hide();
 	}
 
 	// ------------------------------------------------------------------
