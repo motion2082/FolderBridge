@@ -1,7 +1,7 @@
 // Type-only import — no runtime require, so chokidar's Node.js dependencies are
 // never evaluated at bundle-load time on Obsidian Mobile.
 import type * as Chokidar from 'chokidar';
-import { App, normalizePath, Notice, Platform } from 'obsidian';
+import { App, normalizePath, Platform } from 'obsidian';
 import { MountPoint } from './types';
 import { PathMapper } from './PathMapper';
 import { logger } from './logger';
