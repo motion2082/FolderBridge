@@ -53,8 +53,8 @@ type DesktopVaultAdapter = DataAdapter & {
 type ElectronShell = { openPath(p: string): Promise<string> };
 type ElectronModule = { shell?: ElectronShell; default?: { shell?: ElectronShell } };
 
-const GITHUB_REPO_URL = 'https://github.com/tescolopio/Obsidian_FolderBridge';
-const GITHUB_PROFILE_URL = 'https://github.com/tescolopio';
+const GITHUB_REPO_URL = 'https://github.com/motion2082/FolderBridge';
+const GITHUB_PROFILE_URL = 'https://github.com/motion2082';
 
 // ---------------------------------------------------------------------------
 // Helpers

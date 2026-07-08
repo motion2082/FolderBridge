@@ -19,7 +19,7 @@
         "virtual-filesystem",
         "folder-bridge"
     ],
-    "author": "tescolopio",
+    "author": "motion2082",
     "license": "MIT",
     "devDependencies": {
         "@esbuild/linux-x64": "^0.27.3",
