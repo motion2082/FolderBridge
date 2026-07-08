@@ -868,9 +868,8 @@ export class MountManagerModal extends Modal {
 			.addText(text => {
 				fallbackPathText = text;
 				text.inputEl.addClass('folderbridge-input-flex');
-				text.inputEl.addClass('folderbridge-input-min200');
-				// eslint-disable-next-line obsidianmd/ui/sentence-case
-				text.setPlaceholder(`/home/yourname/Documents/Work  or  C:\\Users\\You\\Documents\\Work`)
+				text.inputEl.classList.add('folderbridge-input-minwidth');
+				text.setPlaceholder(`E.g. /home/yourname/Documents/Work  or  C:\\Users\\You\\Documents\\Work`)
 					.setValue(this.fallbackRealPath)
 					.onChange(val => { this.fallbackRealPath = val.trim(); });
 			})
