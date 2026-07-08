@@ -213,6 +213,22 @@ describe('FileWatcher', () => {
             expect(ignored('C:/Users/test/Documents/images/photo.jpg')).toBe(false);
         });
 
+        it('never ignores the watch root itself, even when it is a dot-folder', () => {
+            const dotMount = mkMount('m-dot', 'mounts/claude', 'C:/Users/test/Vault/.claude');
+            const { app } = makeApp();
+            const fw = new FileWatcher(app, makeMapper(dotMount), () => false);
+            fw.startWatching(dotMount);
+            const options = getWatchOptions();
+            if (!options.ignored) throw new Error('Expected ignored callback to be registered');
+
+            // The root itself must be watchable…
+            expect(options.ignored('C:/Users/test/Vault/.claude')).toBe(false);
+            expect(options.ignored('C:/Users/test/Vault/.claude/')).toBe(false);
+            expect(options.ignored('C:/Users/test/Vault/.claude/notes.md')).toBe(false);
+            // …but dot-children inside it are still filtered.
+            expect(options.ignored('C:/Users/test/Vault/.claude/.git')).toBe(true);
+        });
+
         it('applies user-defined ignore rules via isIgnored callback', () => {
             const { app } = makeApp();
             const isIgnored = vi.fn((name: string) => name === 'secret.md');

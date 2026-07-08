@@ -140,13 +140,18 @@ export class FileWatcher {
         // [FEATURE_20260222] Initialize chokidar watcher for the mount's real path
         const watcher = chokidar.watch(realPath, {
             ignored: (testPath: string, stats?: import('fs').Stats) => {
+                const normalizedTest = testPath.replace(/\\/g, '/').replace(/\/$/, '');
+                const normalizedMountReal = realPath.replace(/\\/g, '/').replace(/\/$/, '');
+
+                // Never ignore the watch root itself — the mount root may
+                // legitimately be a dot-folder (e.g. {{vault}}/.claude).
+                if (normalizedTest === normalizedMountReal) return false;
+
                 // Ignore hidden files/folders and node_modules
                 const name = path.basename(testPath);
                 if (name.startsWith('.') || name === 'node_modules') return true;
 
                 // Compute mount-relative real path for path-style ignore patterns
-                const normalizedTest = testPath.replace(/\\/g, '/');
-                const normalizedMountReal = realPath.replace(/\\/g, '/').replace(/\/$/, '');
                 const mountRelativePath: string | undefined = normalizedTest.startsWith(normalizedMountReal + '/')
                     ? normalizedTest.slice(normalizedMountReal.length + 1)
                     : undefined;

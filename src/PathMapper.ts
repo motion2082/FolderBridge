@@ -15,6 +15,7 @@ const path: typeof import('path') = loadOptionalNodeModule<typeof import('path')
 export class PathMapper {
 	private mounts: MountPoint[] = [];
 	private currentDeviceId: string = '';
+	private vaultBasePath: string = '';
 
 	/**
 	 * Pre-sorted, pre-normalized cache rebuilt by update().
@@ -37,8 +38,9 @@ export class PathMapper {
 	private resolvedRealPaths: Map<string, string> = new Map();
 
 	/** Replace the active mount list (call after settings change). */
-	update(mounts: MountPoint[], deviceId: string = ''): void {
+	update(mounts: MountPoint[], deviceId: string = '', vaultBasePath: string = ''): void {
 		this.currentDeviceId = deviceId;
+		this.vaultBasePath = vaultBasePath;
 		this.mounts = mounts.filter(m => m.enabled);
 		// Build a sorted, pre-normalized lookup cache so hot-path methods
 		// (getMountForPath, getMountByVirtualPath, …) never sort or normalize
@@ -76,15 +78,21 @@ export class PathMapper {
 	 *   1. Explicit per-device override (deviceOverrides[currentDeviceId])
 	 *   2. Runtime-resolved fallback (set at activation when primary was inaccessible)
 	 *   3. Primary realPath
+	 * In all cases, {{vault}} is expanded to the vault's base path.
 	 */
 	getEffectiveRealPath(mount: MountPoint): string {
 		if (this.currentDeviceId && mount.deviceOverrides?.[this.currentDeviceId]) {
-			return mount.deviceOverrides[this.currentDeviceId];
+			return this.expandVaultToken(mount.deviceOverrides[this.currentDeviceId]);
 		}
 		if (this.resolvedRealPaths.has(mount.id)) {
 			return this.resolvedRealPaths.get(mount.id)!;
 		}
-		return mount.realPath;
+		return this.expandVaultToken(mount.realPath);
+	}
+
+	expandVaultToken(p: string): string {
+		if (!this.vaultBasePath || !p.includes('{{vault}}')) return p;
+		return p.replace(/\{\{vault\}\}/g, this.vaultBasePath);
 	}
 
 	/**

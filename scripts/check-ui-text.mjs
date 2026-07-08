@@ -1,9 +1,11 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import ts from 'typescript';
 
-const repoRoot = path.resolve(path.dirname(new URL(
-    import.meta.url).pathname), '..');
+// fileURLToPath handles Windows correctly — URL.pathname would yield "/D:/…",
+// which path.resolve mangles into "D:\D:\…".
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scanTargets = [
     path.join(repoRoot, 'main.ts'),
     path.join(repoRoot, 'src'),
