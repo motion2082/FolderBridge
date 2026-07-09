@@ -1,4 +1,4 @@
-import { App, DataAdapter, DataWriteOptions, FuzzySuggestModal, Plugin, PluginSettingTab, Setting, Notice, normalizePath, TAbstractFile, TFolder, TFile } from 'obsidian';
+import { App, DataAdapter, DataWriteOptions, FileSystemAdapter, FuzzySuggestModal, Plugin, PluginSettingTab, Setting, Notice, normalizePath, TAbstractFile, TFolder, TFile } from 'obsidian';
 import { FolderBridgeSettings, MountPoint, DEFAULT_SETTINGS } from './src/types';
 import { PathMapper } from './src/PathMapper';
 import { VirtualAdapter } from './src/VirtualAdapter';
@@ -54,8 +54,8 @@ type DesktopVaultAdapter = DataAdapter & {
 type ElectronShell = { openPath(p: string): Promise<string> };
 type ElectronModule = { shell?: ElectronShell; default?: { shell?: ElectronShell } };
 
-const GITHUB_REPO_URL = 'https://github.com/tescolopio/Obsidian_FolderBridge';
-const GITHUB_PROFILE_URL = 'https://github.com/tescolopio';
+const GITHUB_REPO_URL = 'https://github.com/motion2082/FolderBridge';
+const GITHUB_PROFILE_URL = 'https://github.com/motion2082';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -145,6 +145,7 @@ export default class FolderBridgePlugin extends Plugin {
 		if (this.settings.allowForeignMounts) return true;
 		if (mount.deviceOverrides?.[this.settings.deviceId]) return true;
 		if (mount.fallbackRealPath) return true;
+		if (mount.realPath.includes('{{vault}}')) return true;
 		return false;
 	}
 
@@ -154,21 +155,28 @@ export default class FolderBridgePlugin extends Plugin {
 	 * Stores the result in PathMapper so all subsequent I/O uses the correct path.
 	 * No-op for cloud mounts (WebDAV/S3/SFTP) and when a device override is set.
 	 */
+	getVaultBasePath(): string {
+		const adapter = this.app.vault.adapter;
+		return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : '';
+	}
+
 	private async resolveMountPath(mount: MountPoint): Promise<void> {
 		if (this.isCloudMount(mount)) return;
 		// Device override takes highest priority — PathMapper already handles it
 		if (mount.deviceOverrides?.[this.settings.deviceId]) return;
 		if (!mount.fallbackRealPath) return;
 
-		const { accessible } = await checkPathAccessible(mount.realPath);
+		const expand = (p: string) => this.pathMapper.expandVaultToken(p);
+		const { accessible } = await checkPathAccessible(expand(mount.realPath));
 		if (accessible) {
 			this.pathMapper.clearResolvedPath(mount.id);
 			return;
 		}
-		const fallback = await checkPathAccessible(mount.fallbackRealPath);
+		const fallbackPath = expand(mount.fallbackRealPath);
+		const fallback = await checkPathAccessible(fallbackPath);
 		if (fallback.accessible) {
-			this.pathMapper.setResolvedPath(mount.id, mount.fallbackRealPath);
-			logger.debug(`Folder Bridge: using fallback path "${mount.fallbackRealPath}" for "${mount.virtualPath}" (primary "${mount.realPath}" not accessible)`);
+			this.pathMapper.setResolvedPath(mount.id, fallbackPath);
+			logger.debug(`Folder Bridge: using fallback path "${fallbackPath}" for "${mount.virtualPath}" (primary "${expand(mount.realPath)}" not accessible)`);
 		}
 	}
 
@@ -401,7 +409,8 @@ export default class FolderBridgePlugin extends Plugin {
 	}
 
 	private effectiveRealPathForAllowlist(mount: MountPoint): string {
-		return mount.deviceOverrides?.[this.settings.deviceId] ?? mount.realPath;
+		const raw = mount.deviceOverrides?.[this.settings.deviceId] ?? mount.realPath;
+		return this.pathMapper?.expandVaultToken(raw) ?? raw;
 	}
 
 	private isCloudMount(mount: Pick<MountPoint, 'mountType'>): boolean {
@@ -420,14 +429,14 @@ export default class FolderBridgePlugin extends Plugin {
 				.filter(m => !this.isCloudMount(m))
 				.flatMap(m => [
 					this.effectiveRealPathForAllowlist(m),
-					m.fallbackRealPath,
+					m.fallbackRealPath ? (this.pathMapper?.expandVaultToken(m.fallbackRealPath) ?? m.fallbackRealPath) : undefined,
 				])
 				.filter((p): p is string => !!p),
 		]));
 
 		this.settings.mountPoints = effectiveMounts;
 		this.settings.allowlist = effectiveAllowlist;
-		this.pathMapper?.update(this.settings.mountPoints, this.settings.deviceId);
+		this.pathMapper?.update(this.settings.mountPoints, this.settings.deviceId, this.getVaultBasePath());
 		this.security?.setAllowlist(effectiveAllowlist);
 	}
 
@@ -528,7 +537,7 @@ export default class FolderBridgePlugin extends Plugin {
 
 		this.pathMapper = new PathMapper();
 		this.security = new SecurityManager(this.settings.allowlist);
-		this.pathMapper.update(this.settings.mountPoints, this.settings.deviceId);
+		this.pathMapper.update(this.settings.mountPoints, this.settings.deviceId, this.getVaultBasePath());
 
 		// [FEATURE_20260222] Initialize FileWatcher
 		this.fileWatcher = new FileWatcher(this.app, this.pathMapper, (name, mount) => this.isNameIgnored(name, mount));
@@ -543,7 +552,9 @@ export default class FolderBridgePlugin extends Plugin {
 			// Register all currently active local mounts
 			for (const m of this.settings.mountPoints) {
 				if (m.enabled && m.realPath && !['webdav', 's3', 'sftp'].includes(m.mountType ?? '')) {
-					this.fileServer.addAllowedPath(m.realPath);
+					// Resolve device overrides and the {{vault}} token — the server
+					// compares against real on-disk paths, not raw settings values.
+					this.fileServer.addAllowedPath(this.pathMapper.getEffectiveRealPath(m));
 				}
 			}
 			this.virtualAdapter?.setFileServer(this.fileServer);
@@ -553,7 +564,7 @@ export default class FolderBridgePlugin extends Plugin {
 
 		// Ribbon icon opens the add-mount modal
 		const ribbonIconEl = this.addRibbonIcon('folder-plus', `${this.manifest.name}: add mount`, () => {
-			new MountManagerModal(this.app, this.manifest.name, this.security, (mount) => this.addMount(mount)).open();
+			new MountManagerModal(this.app, this.manifest.name, this.security, (mount) => this.addMount(mount), undefined, this.getVaultBasePath()).open();
 		});
 		ribbonIconEl.addClass('folderbridge-ribbon-class');
 
@@ -589,7 +600,7 @@ export default class FolderBridgePlugin extends Plugin {
 			id: 'add-mount',
 			name: 'Add mount',
 			callback: () => {
-				new MountManagerModal(this.app, this.manifest.name, this.security, (mount) => this.addMount(mount)).open();
+				new MountManagerModal(this.app, this.manifest.name, this.security, (mount) => this.addMount(mount), undefined, this.getVaultBasePath()).open();
 			},
 		});
 
@@ -630,7 +641,7 @@ export default class FolderBridgePlugin extends Plugin {
 							if (!enabling) await this.outerPlugin.notifyVaultMountRemoved(m);
 							m.enabled = enabling;
 							await this.outerPlugin.persistEditableMountFromState(m);
-							this.outerPlugin.pathMapper.update(this.outerPlugin.settings.mountPoints, this.outerPlugin.settings.deviceId);
+							this.outerPlugin.pathMapper.update(this.outerPlugin.settings.mountPoints, this.outerPlugin.settings.deviceId, this.outerPlugin.getVaultBasePath());
 							this.outerPlugin.updateStatusBar();
 							if (enabling) {
 								await this.outerPlugin.notifyVaultMountAdded(m);
@@ -1025,6 +1036,8 @@ export default class FolderBridgePlugin extends Plugin {
 							this.manifest.name,
 							this.security,
 							async (mount) => { await this.addMount(mount); },
+							undefined,
+							this.getVaultBasePath(),
 						).open(),
 						() => { /* dismissed */ },
 					).open();
@@ -1728,7 +1741,7 @@ export default class FolderBridgePlugin extends Plugin {
 		const runtimeMount = this.settings.mountPoints.find(existing => existing.id === mount.id) ?? mount;
 
 		// Register the mount's real path with the streaming server (local mounts only)
-		if (!isCloud && runtimeMount.realPath) this.fileServer.addAllowedPath(runtimeMount.realPath);
+		if (!isCloud && runtimeMount.realPath) this.fileServer.addAllowedPath(this.pathMapper.getEffectiveRealPath(runtimeMount));
 
 		backgroundTask(this.notifyVaultMountAdded(runtimeMount), `Failed to inject newly-added mount "${runtimeMount.virtualPath}" into the vault tree.`);
 
@@ -1781,8 +1794,9 @@ export default class FolderBridgePlugin extends Plugin {
 		if (!stillUsed) {
 			this.persistedAllowlist = this.persistedAllowlist.filter(p => p !== mount.realPath);
 			this.security.revoke(mount.realPath);
-			// Revoke streaming-server access for this real path
-			if (mount.realPath) this.fileServer.removeAllowedPath(mount.realPath);
+			// Revoke streaming-server access for this real path (resolved the same
+			// way it was registered — device overrides and {{vault}} expanded)
+			if (mount.realPath) this.fileServer.removeAllowedPath(this.pathMapper.getEffectiveRealPath(mount));
 		}
 
 		// Tear down adapters and clear stored credentials
@@ -3094,6 +3108,8 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 							await this.plugin.addMount(mount);
 							this.display();
 						},
+						undefined,
+						this.plugin.getVaultBasePath(),
 					).open();
 				}))
 			.addButton(btn => btn
@@ -3265,7 +3281,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 
 							mount.enabled = val;
 							await this.plugin.persistEditableMountFromState(mount);
-							this.plugin.pathMapper.update(this.plugin.settings.mountPoints, this.plugin.settings.deviceId);
+							this.plugin.pathMapper.update(this.plugin.settings.mountPoints, this.plugin.settings.deviceId, this.plugin.getVaultBasePath());
 							this.plugin.updateStatusBar();
 
 							// Inject into Obsidian's vault tree live
@@ -3307,6 +3323,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 		const addOverridePathButton = (): void => {
 			setting.addButton(btn => btn
 				.setButtonText('Set path for this device')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setTooltip(`Set the real folder path for this mount on this device (e.g. after moving from Windows to Linux).`)
 				.onClick(() => {
 					void (async () => {
@@ -3357,6 +3374,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 							this.display();
 						},
 						mount, // pre-populate all fields
+						this.plugin.getVaultBasePath(),
 					).open();
 				}));
 		}

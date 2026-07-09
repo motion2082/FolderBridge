@@ -148,6 +148,67 @@ export class VaultFolderPickerModal extends SuggestModal<string> {
 }
 
 // ---------------------------------------------------------------------------
+// In-vault (on-disk) folder picker modal
+// ---------------------------------------------------------------------------
+
+/**
+ * A folder picker that enumerates directories ON DISK inside the vault's base
+ * folder. Unlike VaultFolderPickerModal (which relies on Obsidian's index) it
+ * also lists hidden dot-folders such as .claude or .obsidian, which Obsidian
+ * never indexes. Selecting an entry yields the vault-relative path of the
+ * chosen folder. End the query with "/" to list a folder's subfolders.
+ */
+export class VaultDiskFolderPickerModal extends SuggestModal<string> {
+	private vaultBasePath: string;
+	private onChoose: (relativePath: string) => void;
+
+	constructor(app: App, vaultBasePath: string, onChoose: (relativePath: string) => void) {
+		super(app);
+		this.vaultBasePath = vaultBasePath;
+		this.onChoose = onChoose;
+		this.setPlaceholder('Type to filter folders — end with / to list a folder’s subfolders');
+	}
+
+	getSuggestions(query: string): string[] {
+		const fs = loadOptionalNodeModule<typeof import('fs')>('fs');
+		if (!fs || !path) return [];
+
+		// Split the query into a parent-directory part and a leaf filter part,
+		// so "abc/de" lists subfolders of "abc" whose name contains "de".
+		const normalized = query.replace(/\\/g, '/');
+		const lastSlash = normalized.lastIndexOf('/');
+		const parentRel = lastSlash === -1 ? '' : normalized.slice(0, lastSlash);
+		const filter = (lastSlash === -1 ? normalized : normalized.slice(lastSlash + 1)).toLowerCase();
+		const parentAbs = parentRel
+			? path.join(this.vaultBasePath, ...parentRel.split('/'))
+			: this.vaultBasePath;
+
+		let entries: import('fs').Dirent[];
+		try {
+			entries = fs.readdirSync(parentAbs, { withFileTypes: true });
+		} catch {
+			return [];
+		}
+		return entries
+			.filter(e => e.isDirectory())
+			.map(e => (parentRel ? `${parentRel}/${e.name}` : e.name))
+			.filter(rel => {
+				if (!filter) return true;
+				const leaf = rel.split('/').pop() ?? '';
+				return leaf.toLowerCase().includes(filter);
+			});
+	}
+
+	renderSuggestion(item: string, el: HTMLElement): void {
+		el.createSpan({ text: item, cls: 'vault-folder-suggestion-label' });
+	}
+
+	onChooseSuggestion(item: string): void {
+		this.onChoose(item);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Callback type
 // ---------------------------------------------------------------------------
 
@@ -219,11 +280,14 @@ export class MountManagerModal extends Modal {
 	private cancelButton: ButtonComponent | null = null;
 	private readonly submitState: SubmitStateController;
 
-	constructor(app: App, pluginName: string, security: SecurityManager, onSave: OnMountSave, editMount?: MountPoint) {
+	private vaultBasePath: string = '';
+
+	constructor(app: App, pluginName: string, security: SecurityManager, onSave: OnMountSave, editMount?: MountPoint, vaultBasePath: string = '') {
 		super(app);
 		this.pluginName = pluginName;
 		this.security = security;
 		this.onSave = onSave;
+		this.vaultBasePath = vaultBasePath;
 		this.editMount = editMount;
 		this.submitState = new SubmitStateController(
 			editMount ? 'Save changes' : 'Validate and add',
@@ -698,14 +762,21 @@ export class MountManagerModal extends Modal {
 		// ── Real path ──────────────────────────────────────────────────────
 		const realPathSetting = new Setting(localSection)
 			.setName('Real path (on disk)')
-			.setDesc('Absolute path to the external folder you want to mount')
+			.setDesc(
+				'Absolute path to the folder on your computer you want to mount. ' +
+				'If the folder is inside this vault, you can use {{vault}} as a stand-in for the vault\'s location ' +
+				'(e.g. {{vault}}\\.claude) — the mount will work on any machine, even if the vault is moved or shared. ' +
+				'Use "In vault…" to pick such a folder from a list that includes hidden dot-folders.'
+			)
 			.addText(text => {
 				this.realPathText = text;
 				text.inputEl.addClass('folderbridge-input-flex');
+				text.inputEl.title = this.realPath;
 				text.setPlaceholder(realPlaceholder)
 					.setValue(this.realPath)
 					.onChange(val => {
 						this.realPath = val.trim();
+						text.inputEl.title = this.realPath;
 						this.syncAutoLabel();
 					});
 			})
@@ -742,6 +813,26 @@ export class MountManagerModal extends Modal {
 				btn.buttonEl.setAttribute('aria-label', `Browse for ${wslLabel} folder`);
 			});
 		}
+		realPathSetting.addButton(btn => {
+			btn.setButtonText('In vault…')
+				.setTooltip('Pick a folder inside this vault — includes hidden dot-folders like .claude that the system picker or Obsidian may not show. Inserts a portable {{vault}} path.')
+				.onClick(() => {
+					if (!this.vaultBasePath) {
+						new Notice(`${this.pluginName}: the vault location is unavailable in this environment.`);
+						return;
+					}
+					new VaultDiskFolderPickerModal(this.app, this.vaultBasePath, (rel) => {
+						const sep = platform === 'windows' ? '\\' : '/';
+						const tokenPath = `{{vault}}${sep}${rel.split('/').join(sep)}`;
+						this.realPath = tokenPath;
+						this.realPathText?.setValue(tokenPath);
+						if (this.realPathText) this.realPathText.inputEl.title = tokenPath;
+						this.syncAutoLabel();
+					}).open();
+				});
+			btn.buttonEl.setAttribute('aria-label', 'Pick a folder inside this vault');
+		});
+		realPathSetting.settingEl.addClass('folderbridge-stacked-control');
 
 		// WSL context hints
 		if (platform === 'windows') {
@@ -765,7 +856,7 @@ export class MountManagerModal extends Modal {
 		// ── Fallback path ──────────────────────────────────────────────────
 		// Only meaningful for local/vault mounts; cloud adapters resolve their own paths.
 		let fallbackPathText: import('obsidian').TextComponent | null = null;
-		new Setting(localSection)
+		const fallbackPathSetting = new Setting(localSection)
 			.setName('Fallback path (optional)')
 			.setDesc(
 				'Alternative folder tried automatically if the real path above is not ' +
@@ -778,7 +869,8 @@ export class MountManagerModal extends Modal {
 				fallbackPathText = text;
 				text.inputEl.addClass('folderbridge-input-flex');
 				text.inputEl.classList.add('folderbridge-input-minwidth');
-				text.setPlaceholder(`E.g. /home/yourname/Documents/Work  or  C:\\Users\\You\\Documents\\Work`)
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+				text.setPlaceholder(`/home/yourname/Documents/Work  or  C:\\Users\\You\\Documents\\Work`)
 					.setValue(this.fallbackRealPath)
 					.onChange(val => { this.fallbackRealPath = val.trim(); });
 			})
@@ -796,9 +888,10 @@ export class MountManagerModal extends Modal {
 					});
 				btn.buttonEl.setAttribute('aria-label', 'Browse for fallback folder on disk');
 			});
+		fallbackPathSetting.settingEl.addClass('folderbridge-stacked-control');
 
 		// ── Virtual path ───────────────────────────────────────────────────
-		new Setting(contentEl)
+		const virtualPathSetting = new Setting(contentEl)
 			.setName('Virtual path (in vault)')
 			.setDesc(
 				'Where this folder will appear inside your vault, e.g. "Projects/Work". ' +
@@ -824,7 +917,8 @@ export class MountManagerModal extends Modal {
 							const existingLeaf = trimmedVirtualPath
 								? path.posix.basename(trimmedVirtualPath)
 								: '';
-							const leaf = existingLeaf || (this.realPath ? path.basename(this.realPath) : '');
+							// Leading dots stripped — Obsidian never displays dot-prefixed vault paths
+							const leaf = existingLeaf || (this.realPath ? path.basename(this.realPath).replace(/^\.+/, '') : '');
 							const combined = chosen
 								? normalizePath(`${chosen}/${leaf}`)
 								: leaf;
@@ -834,6 +928,7 @@ export class MountManagerModal extends Modal {
 					});
 				btn.buttonEl.setAttribute('aria-label', 'Browse vault folders');
 			});
+		virtualPathSetting.settingEl.addClass('folderbridge-stacked-control');
 
 		// ── Use folder name as label ───────────────────────────────────────
 		new Setting(contentEl)
@@ -1227,9 +1322,11 @@ export class MountManagerModal extends Modal {
 		}
 
 		// ── Local filesystem validation ────────────────────────────────────
-		// Fall back to the real folder's base name when no virtual path was typed
+		// Fall back to the real folder's base name when no virtual path was typed.
+		// Leading dots are stripped (".claude" → "claude") because Obsidian never
+		// displays dot-prefixed vault paths.
 		const virtualPathToUse = this.virtualPath.trim()
-			|| (this.realPath ? path.basename(this.realPath) : '');
+			|| (this.realPath ? path.basename(this.realPath).replace(/^\.+/, '') : '');
 
 		if (!virtualPathToUse) {
 			this.submitState.finish();
@@ -1268,8 +1365,13 @@ export class MountManagerModal extends Modal {
 		// on Windows can be edited on Linux to add a fallback without failing path.isAbsolute() on Linux.
 		const realPathChanged = !this.editMount || this.editMount.realPath !== this.realPath;
 		if (realPathChanged) {
+			// Expand {{vault}} before validation so vault-relative paths are checked against the real filesystem.
+			const expandedRealPath = this.vaultBasePath
+				? this.realPath.replace(/\{\{vault\}\}/g, this.vaultBasePath)
+				: this.realPath;
+
 			// Accept paths that are absolute on either platform (e.g. /home/... on Linux, C:\... on Windows)
-			const isAbsolute = path.posix.isAbsolute(this.realPath) || path.win32.isAbsolute(this.realPath);
+			const isAbsolute = path.posix.isAbsolute(expandedRealPath) || path.win32.isAbsolute(expandedRealPath);
 			if (!isAbsolute) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
@@ -1277,20 +1379,34 @@ export class MountManagerModal extends Modal {
 				return;
 			}
 
-			const dirExists = await isDirectory(this.realPath);
+			const dirExists = await isDirectory(expandedRealPath);
 			if (!dirExists) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice(`Folder Bridge: "${this.realPath}" is not an accessible directory.`);
+				new Notice(`Folder Bridge: "${expandedRealPath}" is not an accessible directory.`);
 				return;
 			}
 
-			const { accessible, error } = await checkPathAccessible(this.realPath);
+			const { accessible, error } = await checkPathAccessible(expandedRealPath);
 			if (!accessible) {
 				this.submitState.finish();
 				this.syncSubmitButtons();
-				new Notice(`Folder Bridge: Cannot access "${this.realPath}": ${error}`);
+				new Notice(`Folder Bridge: Cannot access "${expandedRealPath}": ${error}`);
 				return;
+			}
+
+			// Advisory: a non-hidden folder inside the vault is already indexed by
+			// Obsidian, so mounting it shows the same files in two places.
+			if (this.vaultBasePath) {
+				const rel = path.relative(this.vaultBasePath, expandedRealPath);
+				const insideVault = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+				const isHiddenFromObsidian = rel.split(/[\\/]/).some(segment => segment.startsWith('.'));
+				if (insideVault && !isHiddenFromObsidian) {
+					new Notice(
+						`${this.pluginName} warning: this folder is inside your vault and already visible to Obsidian — mounting it will show the same files in two places.`,
+						10_000,
+					);
+				}
 			}
 		}
 

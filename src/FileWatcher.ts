@@ -1,7 +1,7 @@
 // Type-only import — no runtime require, so chokidar's Node.js dependencies are
 // never evaluated at bundle-load time on Obsidian Mobile.
 import type * as Chokidar from 'chokidar';
-import { App, normalizePath, Notice, Platform } from 'obsidian';
+import { App, normalizePath, Platform } from 'obsidian';
 import { MountPoint } from './types';
 import { PathMapper } from './PathMapper';
 import { logger } from './logger';
@@ -66,9 +66,6 @@ export class FileWatcher {
         logger.warn(`[FolderBridge] File watcher unavailable for mount ${mount.virtualPath}:`, error);
         if (this.watcherBackendWarningShown) return;
         this.watcherBackendWarningShown = true;
-        if (typeof Notice === 'function') {
-            new Notice('External file watching is unavailable in this environment. Mounts still work, but filesystem changes made outside Obsidian will not live-sync until the watcher backend is available.');
-        }
     }
 
     // ── Suppression API ────────────────────────────────────────────────────
@@ -143,13 +140,18 @@ export class FileWatcher {
         // [FEATURE_20260222] Initialize chokidar watcher for the mount's real path
         const watcher = chokidar.watch(realPath, {
             ignored: (testPath: string, stats?: import('fs').Stats) => {
+                const normalizedTest = testPath.replace(/\\/g, '/').replace(/\/$/, '');
+                const normalizedMountReal = realPath.replace(/\\/g, '/').replace(/\/$/, '');
+
+                // Never ignore the watch root itself — the mount root may
+                // legitimately be a dot-folder (e.g. {{vault}}/.claude).
+                if (normalizedTest === normalizedMountReal) return false;
+
                 // Ignore hidden files/folders and node_modules
                 const name = path.basename(testPath);
                 if (name.startsWith('.') || name === 'node_modules') return true;
 
                 // Compute mount-relative real path for path-style ignore patterns
-                const normalizedTest = testPath.replace(/\\/g, '/');
-                const normalizedMountReal = realPath.replace(/\\/g, '/').replace(/\/$/, '');
                 const mountRelativePath: string | undefined = normalizedTest.startsWith(normalizedMountReal + '/')
                     ? normalizedTest.slice(normalizedMountReal.length + 1)
                     : undefined;

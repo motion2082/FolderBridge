@@ -171,6 +171,25 @@
     min-width: 200px;
 }
 
+.folderbridge-stacked-control {
+    flex-wrap: wrap;
+}
+
+.folderbridge-stacked-control .setting-item-info {
+    flex-basis: 100%;
+}
+
+.folderbridge-stacked-control .setting-item-control {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.folderbridge-stacked-control .setting-item-control input[type="text"] {
+    flex: 1 1 100%;
+    margin-bottom: 4px;
+}
+
 .folderbridge-input-narrow {
     width: 80px !important;
 }

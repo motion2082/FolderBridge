@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
-        "lint": "eslint main.ts 'src/**/*.ts'",
+        "lint": "eslint main.ts src",
         "check:ui-text": "node scripts/check-ui-text.mjs",
         "test": "vitest run",
         "validate": "npm run lint && npm run check:ui-text && npm run build && npm test",
@@ -19,7 +19,7 @@
         "virtual-filesystem",
         "folder-bridge"
     ],
-    "author": "tescolopio",
+    "author": "motion2082",
     "license": "MIT",
     "devDependencies": {
         "@esbuild/linux-x64": "^0.27.3",

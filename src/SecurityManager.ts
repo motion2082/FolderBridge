@@ -65,8 +65,23 @@ export class SecurityManager {
 			if (!mount.realPath || !mount.realPath.trim()) {
 				return 'Real path cannot be empty.';
 			}
-			if (!path.posix.isAbsolute(mount.realPath) && !path.win32.isAbsolute(mount.realPath)) {
+			// Paths anchored at the {{vault}} token expand to the vault's absolute
+			// base path at runtime, so they count as absolute here.
+			const trimmedReal = mount.realPath.trim();
+			const usesVaultToken = /^\{\{vault\}\}([\\/]|$)/.test(trimmedReal);
+			if (usesVaultToken) {
+				if (/^\{\{vault\}\}[\\/]*$/.test(trimmedReal)) {
+					return 'Cannot mount the entire vault into itself — pick a subfolder, e.g. {{vault}}/.claude.';
+				}
+			} else if (!path.posix.isAbsolute(mount.realPath) && !path.win32.isAbsolute(mount.realPath)) {
 				return 'Real path must be an absolute filesystem path.';
+			}
+
+			// Block mounting an entire drive (D:\, E:/, …) — the C:\ case is
+			// covered by the dangerous-path list below, which also protects its
+			// system subdirectories.
+			if (/^[a-zA-Z]:[\\/]*$/.test(trimmedReal)) {
+				return `"${mount.realPath}" is an entire drive and cannot be mounted. Pick a folder on the drive instead.`;
 			}
 
 			// Block obviously dangerous root-level paths and their subdirectories
@@ -93,6 +108,12 @@ export class SecurityManager {
 
 		// Normalize virtual path (trim and remove trailing slashes) for comparison
 		const virtualNorm = mount.virtualPath.trim().replace(/[\\/]+$/, '');
+
+		// Obsidian never displays dot-prefixed paths, so such a mount would be
+		// invisible in the file explorer. Reject early with a clear explanation.
+		if (virtualNorm.split(/[\\/]/).some(segment => segment.startsWith('.'))) {
+			return `Virtual path "${virtualNorm}" contains a folder starting with "." — Obsidian hides dot-folders, so the mount would be invisible. Use a name without the leading dot.`;
+		}
 
 		// Reject duplicate virtual paths
 		if (

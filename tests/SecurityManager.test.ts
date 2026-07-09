@@ -115,6 +115,33 @@ describe('SecurityManager', () => {
 			expect(sec.getPathWarnings('/real/parent/child', existing).length).toBeGreaterThan(0);
 		});
 
+		it('accepts a {{vault}}-anchored real path as absolute', () => {
+			expect(sec.validateMount(mkMount('ClaudeConfig', '{{vault}}/.claude'), [])).toBeNull();
+		});
+
+		it('accepts a {{vault}}-anchored real path with backslashes', () => {
+			expect(sec.validateMount(mkMount('ClaudeConfig', '{{vault}}\\.claude'), [])).toBeNull();
+		});
+
+		it('rejects mounting the bare {{vault}} token (vault root into itself)', () => {
+			expect(sec.validateMount(mkMount('Everything', '{{vault}}'), [])).toMatch(/vault/i);
+			expect(sec.validateMount(mkMount('Everything', '{{vault}}/'), [])).toMatch(/vault/i);
+		});
+
+		it('rejects a virtual path with a dot-prefixed segment (hidden in Obsidian)', () => {
+			expect(sec.validateMount(mkMount('.claude', '/home/user/.claude'), [])).toMatch(/hides|invisible/i);
+			expect(sec.validateMount(mkMount('Projects/.hidden', '/home/user/docs'), [])).toMatch(/hides|invisible/i);
+		});
+
+		it('rejects mounting an entire drive root', () => {
+			expect(sec.validateMount(mkMount('DriveD', 'D:\\'), [])).toMatch(/entire drive/i);
+			expect(sec.validateMount(mkMount('DriveE', 'E:/'), [])).toMatch(/entire drive/i);
+		});
+
+		it('still allows a folder on a non-system drive', () => {
+			expect(sec.validateMount(mkMount('Notes', 'D:\\Notes'), [])).toBeNull();
+		});
+
 		it('allows Backup/Code-Scalpel and Backup to coexist as separate bridges', () => {
 			// Scenario from issue: mount virtualPath "Code-Scalpel" → /Backup/Code-Scalpel first,
 			// then mount virtualPath "Backup" → /Backup.  Real paths overlap; virtual paths do not.
