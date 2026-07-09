@@ -2,7 +2,7 @@
 
 Extends Obsidian's single-root vault by letting you mount external folders as seamless, native-feeling directories inside your vault. Files stay in their original locations — no copying, no duplicating, no symlinking required.
 
-Originally created by [tescolopio](https://github.com/tescolopio); this repository is an independent continuation.
+Maintained by [motion2082](https://github.com/motion2082). Originally created by [tescolopio](https://github.com/tescolopio); this repository is an independent continuation.
 
 ---
 
