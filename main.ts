@@ -538,6 +538,11 @@ export default class FolderBridgePlugin extends Plugin {
 		this.pathMapper = new PathMapper();
 		this.security = new SecurityManager(this.settings.allowlist);
 		this.pathMapper.update(this.settings.mountPoints, this.settings.deviceId, this.getVaultBasePath());
+		// Re-derive the effective allowlist now that pathMapper exists: the sync
+		// inside loadSettings() ran before pathMapper was constructed, so {{vault}}
+		// tokens in allowlist entries could not be expanded there. Without this,
+		// every I/O in a {{vault}} mount fails assertAllowed() after a restart.
+		this.syncEffectiveMountState();
 
 		// [FEATURE_20260222] Initialize FileWatcher
 		this.fileWatcher = new FileWatcher(this.app, this.pathMapper, (name, mount) => this.isNameIgnored(name, mount));
