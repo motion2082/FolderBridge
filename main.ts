@@ -3323,6 +3323,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 		const addOverridePathButton = (): void => {
 			setting.addButton(btn => btn
 				.setButtonText('Set path for this device')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
 				.setTooltip(`Set the real folder path for this mount on this device (e.g. after moving from Windows to Linux).`)
 				.onClick(() => {
 					void (async () => {
