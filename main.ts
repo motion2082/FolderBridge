@@ -3469,7 +3469,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 
 		// ── Async status badge ───────────────────────────────────────────────
 		if (canEnable) {
-			void getMountStatus(mount).then(status => {
+			void getMountStatus(mount, this.plugin.pathMapper.getEffectiveRealPath(mount)).then(status => {
 				const isUnreachable = this.plugin.mountHealthMap.get(mount.id) === false;
 				const badge = isUnreachable
 					? '[unreachable]'

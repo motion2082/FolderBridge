@@ -1451,8 +1451,13 @@ export class MountManagerModal extends Modal {
 /**
  * Query the live reachability and permission status of a mount point.
  * Called when the settings tab renders the mount list.
+ *
+ * Pass `effectiveRealPath` (from PathMapper.getEffectiveRealPath) so device
+ * overrides, runtime fallback resolution, and the {{vault}} token are honoured;
+ * checking the raw realPath would resolve a {{vault}} entry relative to the
+ * process working directory and always report ENOENT.
  */
-export async function getMountStatus(mount: MountPoint): Promise<MountStatus> {
+export async function getMountStatus(mount: MountPoint, effectiveRealPath?: string): Promise<MountStatus> {
 	// Remote mounts (WebDAV, S3, SFTP) have no local filesystem path to check.
 	// Their reachability is probed by the plugin's health-check loop separately.
 	// Return a placeholder "reachable" status so the settings panel stays clean.
@@ -1464,7 +1469,7 @@ export async function getMountStatus(mount: MountPoint): Promise<MountStatus> {
 			error: undefined,
 		};
 	}
-	const { accessible, readOnly, error } = await checkPathAccessible(mount.realPath);
+	const { accessible, readOnly, error } = await checkPathAccessible(effectiveRealPath ?? mount.realPath);
 	return {
 		mount,
 		reachable: accessible,
