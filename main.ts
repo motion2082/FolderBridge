@@ -1154,27 +1154,36 @@ export default class FolderBridgePlugin extends Plugin {
 	 * Works across Obsidian versions that use either `fileMap` or
 	 * `abstractFilesInPath` as the internal property name.
 	 */
+	private _warnedNoFileMap = false;
+
 	private getFileMap(): Record<string, TAbstractFile> | undefined {
 		const vaultAny = this.app.vault as unknown as Record<string, unknown>;
-		return (vaultAny['fileMap'] ?? vaultAny['abstractFilesInPath']) as
+		const map = (vaultAny['fileMap'] ?? vaultAny['abstractFilesInPath']) as
 			| Record<string, TAbstractFile>
 			| undefined;
+		if (!map && !this._warnedNoFileMap) {
+			this._warnedNoFileMap = true;
+			logger.warn('Folder Bridge: vault.fileMap not found in this Obsidian version — using the onChange fallback for vault-tree injection.');
+		}
+		return map;
 	}
 
 	/**
 	 * Cached reference to the file-explorer view, resolved once lazily.
 	 * Type is `unknown` because the FileExplorer view class is internal.
 	 */
-	private _fileExplorerView: { onCreate(f: TAbstractFile): void; requestSort(): void } | null | undefined = undefined;
+	private _fileExplorerView: { onCreate(f: TAbstractFile): void; requestSort(): void } | null = null;
 
 	private getFileExplorerView(): { onCreate(f: TAbstractFile): void; requestSort(): void } | null {
-		if (this._fileExplorerView !== undefined) return this._fileExplorerView;
+		// Only cache a successful lookup. The explorer leaf may not exist (or may
+		// still be a deferred placeholder) when the first injection runs during
+		// startup — caching that failure would leave the explorer un-notified for
+		// the entire session.
+		if (this._fileExplorerView) return this._fileExplorerView;
 		const leaves = this.app.workspace.getLeavesOfType('file-explorer');
 		const view = leaves[0]?.view as { onCreate?(f: TAbstractFile): void; requestSort?(): void } | undefined;
 		if (view && typeof view.onCreate === 'function' && typeof view.requestSort === 'function') {
 			this._fileExplorerView = view as { onCreate(f: TAbstractFile): void; requestSort(): void };
-		} else {
-			this._fileExplorerView = null;
 		}
 		return this._fileExplorerView;
 	}
@@ -1188,7 +1197,14 @@ export default class FolderBridgePlugin extends Plugin {
 	private injectVirtualFolder(folderPath: string): void {
 		if (this.app.vault.getAbstractFileByPath(folderPath)) return;
 		const fileMap = this.getFileMap();
-		if (!fileMap) return;
+		if (!fileMap) {
+			// Obsidian's internal map is unavailable (renamed in this Obsidian
+			// version) — fall back to the onChange reconciliation path. Slower
+			// (routes through MetadataCache/IDB) but reliably surfaces the entry.
+			const vault = this.app.vault as typeof this.app.vault & VaultInternal;
+			if (typeof vault.onChange === 'function') void vault.onChange('folder-created', folderPath, null, null);
+			return;
+		}
 
 		const folder = Object.create(TFolder.prototype);
 		if (!(folder instanceof TFolder)) return;
@@ -1225,7 +1241,24 @@ export default class FolderBridgePlugin extends Plugin {
 	): void {
 		if (this.app.vault.getAbstractFileByPath(filePath)) return;
 		const fileMap = this.getFileMap();
-		if (!fileMap) return;
+		if (!fileMap) {
+			// Same fallback as injectVirtualFolder — see comment there. onChange
+			// needs a stat object for created files, so fetch one if not supplied.
+			const vault = this.app.vault as typeof this.app.vault & VaultInternal;
+			if (typeof vault.onChange !== 'function') return;
+			void (async () => {
+				const effectiveStat = stat ?? await this.app.vault.adapter.stat(filePath);
+				if (effectiveStat) {
+					await vault.onChange('file-created', filePath, null, {
+						type: effectiveStat.type ?? 'file',
+						ctime: effectiveStat.ctime,
+						mtime: effectiveStat.mtime,
+						size: effectiveStat.size,
+					});
+				}
+			})().catch(err => logger.debug(`Folder Bridge: onChange fallback failed for ${filePath}`, err));
+			return;
+		}
 
 		const file = Object.create(TFile.prototype);
 		if (!(file instanceof TFile)) return;
