@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as path from 'path';
-import { PathMapper } from '../src/PathMapper';
+import { PathMapper, expandVaultToken, toVaultTokenPath } from '../src/PathMapper';
 import type { MountPoint } from '../src/types';
 
 function mount(virtualPath: string, realPath: string): MountPoint {
@@ -135,6 +135,93 @@ describe('PathMapper', () => {
 		it('returns true for the vault root when any mount exists', () => {
 			mapper.update([mount('Work', '/real/Work')]);
 			expect(mapper.hasMountsUnder('')).toBe(true);
+		});
+	});
+
+	describe('getEffectiveRealPath / {{vault}} token', () => {
+		it('expands {{vault}} to the vault base path', () => {
+			const m = mount('claude', '{{vault}}/.claude');
+			mapper.update([m], 'dev1', '/home/user/Vault');
+			expect(mapper.getEffectiveRealPath(m)).toBe('/home/user/Vault/.claude');
+		});
+
+		it('returns the raw path when no vault base path is known', () => {
+			const m = mount('claude', '{{vault}}/.claude');
+			mapper.update([m]);
+			expect(mapper.getEffectiveRealPath(m)).toBe('{{vault}}/.claude');
+		});
+
+		it('does not report a {{vault}} mount as using its fallback', () => {
+			const m = mount('claude', '{{vault}}/.claude');
+			mapper.update([m], 'dev1', '/home/user/Vault');
+			expect(mapper.isUsingFallbackPath(m.id)).toBe(false);
+		});
+
+		it('reports the fallback only after a runtime path was resolved', () => {
+			const m = { ...mount('Work', '/missing/Work'), fallbackRealPath: '/real/Work' };
+			mapper.update([m], 'dev1', '/home/user/Vault');
+			expect(mapper.isUsingFallbackPath(m.id)).toBe(false);
+
+			mapper.setResolvedPath(m.id, '/real/Work');
+			expect(mapper.isUsingFallbackPath(m.id)).toBe(true);
+			expect(mapper.getEffectiveRealPath(m)).toBe('/real/Work');
+
+			mapper.clearResolvedPath(m.id);
+			expect(mapper.isUsingFallbackPath(m.id)).toBe(false);
+			expect(mapper.getEffectiveRealPath(m)).toBe('/missing/Work');
+		});
+
+		it('prefers a device override and expands {{vault}} inside it', () => {
+			const m: MountPoint = {
+				...mount('Work', '/primary/Work'),
+				deviceOverrides: { dev1: '{{vault}}/Work' },
+			};
+			mapper.update([m], 'dev1', '/home/user/Vault');
+			expect(mapper.getEffectiveRealPath(m)).toBe('/home/user/Vault/Work');
+		});
+	});
+
+	describe('expandVaultToken (standalone)', () => {
+		it('expands every occurrence of the token', () => {
+			expect(expandVaultToken('{{vault}}/a/{{vault}}', '/v')).toBe('/v/a//v');
+		});
+
+		it('returns the input unchanged without a base path or token', () => {
+			expect(expandVaultToken('{{vault}}/a', '')).toBe('{{vault}}/a');
+			expect(expandVaultToken('/plain/path', '/v')).toBe('/plain/path');
+		});
+	});
+
+	describe('toVaultTokenPath', () => {
+		const base = path.resolve('/home/user/Vault');
+
+		it('rewrites an absolute path inside the vault as {{vault}}/... with forward slashes', () => {
+			const file = path.join(base, 'folderbridge.managed.json');
+			expect(toVaultTokenPath(file, base)).toBe('{{vault}}/folderbridge.managed.json');
+			const nested = path.join(base, '.claude', 'skills');
+			expect(toVaultTokenPath(nested, base)).toBe('{{vault}}/.claude/skills');
+		});
+
+		it('round-trips through expandVaultToken', () => {
+			const file = path.join(base, 'folderbridge.managed.json');
+			const token = toVaultTokenPath(file, base);
+			expect(path.normalize(expandVaultToken(token, base))).toBe(file);
+		});
+
+		it('leaves paths outside the vault alone', () => {
+			const outside = path.resolve('/home/user/Other/toc.json');
+			expect(toVaultTokenPath(outside, base)).toBe(outside);
+			// Sibling folder that merely shares the vault name as a prefix
+			const sibling = path.resolve('/home/user/Vault2/toc.json');
+			expect(toVaultTokenPath(sibling, base)).toBe(sibling);
+		});
+
+		it('leaves the vault root, relative paths, tokenised paths and empty input alone', () => {
+			expect(toVaultTokenPath(base, base)).toBe(base);
+			expect(toVaultTokenPath('relative/toc.json', base)).toBe('relative/toc.json');
+			expect(toVaultTokenPath('{{vault}}/toc.json', base)).toBe('{{vault}}/toc.json');
+			expect(toVaultTokenPath('', base)).toBe('');
+			expect(toVaultTokenPath(path.join(base, 'toc.json'), '')).toBe(path.join(base, 'toc.json'));
 		});
 	});
 

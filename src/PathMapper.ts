@@ -4,6 +4,33 @@ import { loadOptionalNodeModule } from './runtimeNode';
 // Node.js builtins are lazy-loaded so the plugin still loads on mobile
 const path: typeof import('path') = loadOptionalNodeModule<typeof import('path')>('path') ?? null as never;
 
+export const VAULT_TOKEN = '{{vault}}';
+
+/**
+ * Replace every {{vault}} token in `p` with the vault's absolute base path.
+ * Returns `p` unchanged when the base path is unknown (e.g. mobile) or the
+ * token is absent, so callers can always pass paths through this safely.
+ */
+export function expandVaultToken(p: string, vaultBasePath: string): string {
+	if (!vaultBasePath || !p.includes(VAULT_TOKEN)) return p;
+	return p.replace(/\{\{vault\}\}/g, vaultBasePath);
+}
+
+/**
+ * Inverse of expandVaultToken for paths that live inside the vault: rewrites an
+ * absolute path under `vaultBasePath` as a portable `{{vault}}/...` path (always
+ * forward slashes, so the same value works on Windows, macOS and Linux).
+ * Paths outside the vault, already-tokenised paths, and the vault root itself
+ * are returned unchanged.
+ */
+export function toVaultTokenPath(p: string, vaultBasePath: string): string {
+	if (!path || !vaultBasePath || !p || p.includes(VAULT_TOKEN)) return p;
+	if (!path.isAbsolute(p)) return p;
+	const rel = path.relative(vaultBasePath, p);
+	if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return p;
+	return `${VAULT_TOKEN}/${rel.split(path.sep).join('/')}`;
+}
+
 /**
  * PathMapper maintains the list of active mount points and provides
  * bidirectional translation between vault-relative virtual paths and
@@ -68,6 +95,16 @@ export class PathMapper {
 		this.resolvedRealPaths.delete(mountId);
 	}
 
+	/**
+	 * True when this mount is currently served from its fallbackRealPath
+	 * (the primary was inaccessible at activation). Distinct from a mount whose
+	 * effective path merely differs from the raw realPath because {{vault}}
+	 * was expanded.
+	 */
+	isUsingFallbackPath(mountId: string): boolean {
+		return this.resolvedRealPaths.has(mountId);
+	}
+
 	getMounts(): MountPoint[] {
 		return this.mounts;
 	}
@@ -91,8 +128,7 @@ export class PathMapper {
 	}
 
 	expandVaultToken(p: string): string {
-		if (!this.vaultBasePath || !p.includes('{{vault}}')) return p;
-		return p.replace(/\{\{vault\}\}/g, this.vaultBasePath);
+		return expandVaultToken(p, this.vaultBasePath);
 	}
 
 	/**

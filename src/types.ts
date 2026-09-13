@@ -121,14 +121,20 @@ export interface MountPoint {
 export interface FolderBridgeSettings {
 	mountPoints: MountPoint[];
 	allowlist: string[];    // Approved real paths (must match before any I/O)
-	managedTocSource: string; // Optional writable TOC file for UI-managed local/vault mounts
+	/**
+	 * Optional writable TOC file for UI-managed local/vault mounts.
+	 * May use {{vault}} (e.g. "{{vault}}/folderbridge.managed.json") so the same
+	 * data.json works on every machine the vault is opened on; absolute paths
+	 * inside the vault are rewritten to this form at load time.
+	 */
+	managedTocSource: string;
 	/**
 	 * Alternative TOC file path tried when managedTocSource is not accessible.
 	 * Useful for cross-platform vaults: set the Windows path as managedTocSource
-	 * and the Linux/macOS path here (or vice-versa).
+	 * and the Linux/macOS path here (or vice-versa). Also accepts {{vault}}.
 	 */
 	managedTocSourceFallback?: string;
-	tocSources: string[];   // Absolute paths to JSON config files that define additional mounts
+	tocSources: string[];   // Paths to JSON config files that define additional mounts (absolute or {{vault}}-relative)
 	dryRun: boolean;        // Log writes without executing them
 	showStatusBar: boolean;
 	mountRootDeletionBehavior: 'ask' | 'unmount' | 'delete';

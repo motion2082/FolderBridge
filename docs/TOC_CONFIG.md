@@ -44,6 +44,14 @@ If you already built your mount list in Settings, you do not need to rebuild it 
 
 Cloud mounts such as WebDAV, S3, and SFTP remain in `data.json` because TOC files do not support credentials.
 
+### Portable TOC paths with `{{vault}}`
+
+The managed TOC path, its fallback path, and external TOC paths all accept the `{{vault}}` token, which expands to the vault's folder on whichever machine opens it. The suggested managed path is `{{vault}}/folderbridge.managed.json`.
+
+Use this whenever the TOC file lives inside the vault: the same `data.json` then works for anyone you share the vault with, on Windows, macOS, or Linux, without carrying your own absolute vault path. Always write the token path with forward slashes.
+
+If an existing setting points to an absolute path inside the current vault, Folder Bridge rewrites it to the `{{vault}}` form the next time the plugin loads. The resolved path on this device is shown under the setting.
+
 ## Minimal Shape
 
 ```json

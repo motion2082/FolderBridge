@@ -1,6 +1,6 @@
 import { App, DataAdapter, DataWriteOptions, FileSystemAdapter, FuzzySuggestModal, Plugin, PluginSettingTab, Setting, Notice, normalizePath, TAbstractFile, TFolder, TFile } from 'obsidian';
 import { FolderBridgeSettings, MountPoint, DEFAULT_SETTINGS } from './src/types';
-import { PathMapper } from './src/PathMapper';
+import { PathMapper, expandVaultToken, toVaultTokenPath } from './src/PathMapper';
 import { VirtualAdapter } from './src/VirtualAdapter';
 import { SecurityManager } from './src/SecurityManager';
 import { MountManagerModal, getMountStatus, browseFolderOnDisk, browseMultipleFoldersOnDisk, VaultFolderPickerModal } from './src/ui/MountManagerModal';
@@ -184,21 +184,37 @@ export default class FolderBridgePlugin extends Plugin {
 		return [...this.tocWarnings];
 	}
 
+	/**
+	 * Expand {{vault}} in a TOC file path (managed, fallback or external) to the
+	 * absolute path for this device. TOC paths are stored with the token so a
+	 * vault can be copied or shared between machines without editing data.json.
+	 * Unlike mount paths this does not depend on pathMapper, because the managed
+	 * TOC is resolved inside loadSettings() before pathMapper exists.
+	 */
+	expandTocPath(p: string): string {
+		const trimmed = p.trim();
+		if (!trimmed) return '';
+		const expanded = expandVaultToken(trimmed, this.getVaultBasePath());
+		// A token path always uses '/', so tidy the separators on Windows.
+		return expanded !== trimmed && path ? path.normalize(expanded) : expanded;
+	}
+
 	private getManagedTocSourcePath(): string | null {
 		// Use runtime-resolved path (primary or fallback, whichever was accessible at load time)
 		if (this.resolvedManagedTocSource) return this.resolvedManagedTocSource;
-		const sourcePath = this.settings.managedTocSource?.trim();
+		const sourcePath = this.expandTocPath(this.settings.managedTocSource ?? '');
 		return sourcePath ? sourcePath : null;
 	}
 
 	/**
 	 * Resolves which managed TOC file to use: checks the primary path first,
 	 * then falls back to managedTocSourceFallback if the primary isn't accessible.
+	 * Both may contain {{vault}}; the cached value is always the expanded path.
 	 * Result is cached in resolvedManagedTocSource for the session.
 	 */
 	async resolveAndCacheManagedTocSource(): Promise<void> {
-		const primary = this.settings.managedTocSource?.trim();
-		const fallback = this.settings.managedTocSourceFallback?.trim();
+		const primary = this.expandTocPath(this.settings.managedTocSource ?? '');
+		const fallback = this.expandTocPath(this.settings.managedTocSourceFallback ?? '');
 
 		if (!primary && !fallback) {
 			this.resolvedManagedTocSource = '';
@@ -236,11 +252,16 @@ export default class FolderBridgePlugin extends Plugin {
 		return mountType === undefined || mountType === 'local' || mountType === 'vault';
 	}
 
+	/**
+	 * Default managed TOC location: the vault root, expressed with the portable
+	 * {{vault}} token rather than this machine's absolute vault path so the
+	 * setting keeps working when the vault is shared or moved.
+	 */
 	private getSuggestedManagedTocSourcePath(): string | null {
 		if (!path) return null;
 		const adapter = this.app.vault.adapter as DesktopVaultAdapter;
 		const basePath = typeof adapter.getBasePath === 'function' ? adapter.getBasePath() : '';
-		return basePath ? path.join(basePath, 'folderbridge.managed.json') : null;
+		return basePath ? '{{vault}}/folderbridge.managed.json' : null;
 	}
 
 	getSuggestedManagedTocPath(): string | null {
@@ -295,9 +316,10 @@ export default class FolderBridgePlugin extends Plugin {
 
 		const previousSource = this.settings.managedTocSource;
 		const previousResolved = this.resolvedManagedTocSource;
-		this.settings.managedTocSource = trimmedPath;
-		this.resolvedManagedTocSource = trimmedPath; // explicit bind always uses the provided path
-		this.settings.tocSources = this.settings.tocSources.filter(item => item.trim() !== trimmedPath);
+		const expandedPath = this.expandTocPath(trimmedPath);
+		this.settings.managedTocSource = trimmedPath; // keep {{vault}} in data.json — it is what makes the setting portable
+		this.resolvedManagedTocSource = expandedPath; // explicit bind always uses the provided path
+		this.settings.tocSources = this.settings.tocSources.filter(item => this.expandTocPath(item) !== expandedPath);
 
 		try {
 			if (!await this.writeManagedTocMounts(this.getManagedTocDraftMounts())) {
@@ -446,7 +468,7 @@ export default class FolderBridgePlugin extends Plugin {
 		const managedSource = this.getManagedTocSourcePath();
 		const externalSources = Array.from(new Set(
 			this.settings.tocSources
-				.map(source => source.trim())
+				.map(source => this.expandTocPath(source))
 				.filter(Boolean)
 				.filter(source => source !== managedSource)
 		));
@@ -2293,8 +2315,15 @@ export default class FolderBridgePlugin extends Plugin {
 			return;
 		}
 
-		// Fallback for future Obsidian versions where the internal map name
-		// has changed: use vault.onChange batched with UI yields.
+		// Fallback for Obsidian versions where the internal map name has
+		// changed: use vault.onChange batched with UI yields.
+		//
+		// Every removal MUST be awaited before this method resolves. Callers
+		// such as updateMount() re-scan the mount immediately afterwards, and
+		// that scan skips any path that is still present in the vault tree. If
+		// the removals were still pending at that point the scan would skip
+		// everything, then the removals would land and leave empty folders
+		// behind until the next Obsidian reload.
 		const vault = this.app.vault as typeof this.app.vault & VaultInternal;
 		if (typeof vault.onChange !== 'function') return;
 
@@ -2313,10 +2342,13 @@ export default class FolderBridgePlugin extends Plugin {
 		entries.push({ path: nPath, isFolder: true });
 
 		const BATCH = 200;
-		for (let i = 0; i < entries.length; i++) {
-			const e = entries[i];
-			void vault.onChange(e.isFolder ? 'folder-removed' : 'file-removed', e.path, null, null);
-			if (i > 0 && i % BATCH === 0) {
+		for (let i = 0; i < entries.length; i += BATCH) {
+			const batch = entries.slice(i, i + BATCH);
+			await Promise.all(batch.map(e =>
+				vault.onChange(e.isFolder ? 'folder-removed' : 'file-removed', e.path, null, null)
+					.catch((err: unknown) => logger.debug(`Folder Bridge: Failed to remove ${e.path} from the vault tree`, err))
+			));
+			if (i + BATCH < entries.length) {
 				await new Promise<void>(resolve => setTimeout(resolve, 0));
 			}
 		}
@@ -2565,6 +2597,27 @@ export default class FolderBridgePlugin extends Plugin {
 				}
 			}
 			delete legacySettings['ignoreList'];
+		}
+
+		// Portability: a managed TOC path that points inside this vault is stored
+		// as {{vault}}/... so the vault can be copied to another machine (or shared
+		// with other people) without carrying this computer's absolute vault path.
+		// The expanded value is identical on this device, so nothing changes here.
+		const vaultBasePath = this.getVaultBasePath();
+		if (vaultBasePath) {
+			const portablePrimary = toVaultTokenPath(this.settings.managedTocSource.trim(), vaultBasePath);
+			if (portablePrimary !== this.settings.managedTocSource) {
+				logger.debug(`Folder Bridge: storing managed TOC path "${this.settings.managedTocSource}" as "${portablePrimary}"`);
+				this.settings.managedTocSource = portablePrimary;
+			}
+			const rawFallback = this.settings.managedTocSourceFallback?.trim();
+			if (rawFallback) {
+				const portableFallback = toVaultTokenPath(rawFallback, vaultBasePath);
+				if (portableFallback !== rawFallback) {
+					logger.debug(`Folder Bridge: storing managed TOC fallback "${rawFallback}" as "${portableFallback}"`);
+					this.settings.managedTocSourceFallback = portableFallback;
+				}
+			}
 		}
 
 		this.syncEffectiveMountState();
@@ -2941,6 +2994,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 		const renderManagedToc = () => {
 			managedTocContainer.empty();
 			const currentPath = this.plugin.settings.managedTocSource.trim();
+			const expandedCurrent = this.plugin.expandTocPath(currentPath);
 			const suggestedPath = this.plugin.getSuggestedManagedTocPath();
 			managedTocContainer.createEl('p', {
 				text: currentPath
@@ -2949,9 +3003,18 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 				cls: 'setting-item-description',
 			});
 
-			// Show when fallback is active
+			// Show where a {{vault}} path lands on this machine, and when the
+			// fallback is active. Compare against the *expanded* primary so a
+			// {{vault}} path is not mistaken for a fallback.
 			const resolvedToc = this.plugin.resolvedManagedTocSource;
-			if (currentPath && resolvedToc && resolvedToc !== currentPath) {
+			const usingFallback = !!currentPath && !!resolvedToc && resolvedToc !== expandedCurrent;
+			if (currentPath && expandedCurrent !== currentPath && !usingFallback) {
+				managedTocContainer.createEl('p', {
+					text: `Resolves on this device to: ${expandedCurrent}`,
+					cls: 'setting-item-description',
+				});
+			}
+			if (usingFallback) {
 				managedTocContainer.createEl('p', {
 					text: `Using fallback TOC file on this device: ${resolvedToc}`,
 					cls: 'setting-item-description',
@@ -2959,11 +3022,16 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			}
 
 			if (!currentPath && suggestedPath) {
+				const expandedSuggested = this.plugin.expandTocPath(suggestedPath);
 				managedTocContainer.createEl('p', {
-					text: `Suggested location: ${suggestedPath}`,
+					text: `Suggested location: ${suggestedPath}${expandedSuggested !== suggestedPath ? ` (${expandedSuggested} on this device)` : ''}`,
 					cls: 'setting-item-description',
 				});
 			}
+			managedTocContainer.createEl('p', {
+				text: 'Use {{vault}} as a stand-in for the vault folder so the same path works on every machine, even when the vault is moved or shared.',
+				cls: 'setting-item-description',
+			});
 
 			// Fallback TOC path (for cross-platform vaults)
 			const fallbackRow = managedTocContainer.createDiv('folderbridge-ignore-add');
@@ -2974,7 +3042,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			fallbackLabel.classList.add('folderbridge-nowrap');
 			const fallbackInput = fallbackRow.createEl('input', {
 				type: 'text',
-				placeholder: 'Alternative path for this platform (e.g. /home/me/folderbridge.managed.json)',
+				placeholder: 'Alternative path tried when the primary is missing (e.g. {{vault}}/folderbridge.managed.json)',
 			});
 			fallbackInput.classList.add('folderbridge-input-flex');
 			fallbackInput.value = this.plugin.settings.managedTocSourceFallback ?? '';
@@ -3007,7 +3075,7 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			const addRow = managedTocContainer.createDiv('folderbridge-ignore-add');
 			const inputEl = addRow.createEl('input', {
 				type: 'text',
-				placeholder: 'Absolute path to a writable TOC JSON file, e.g. /home/me/folderbridge.managed.json',
+				placeholder: 'Path to a writable TOC JSON file, e.g. {{vault}}/folderbridge.managed.json',
 			});
 			inputEl.value = currentPath || suggestedPath || '';
 
@@ -3273,15 +3341,24 @@ class FolderBridgeSettingTab extends PluginSettingTab {
 			desc += ` (Created on device: ${mount.deviceId?.substring(0, 8) || 'unknown'})`;
 		}
 
-		const effectivePath = this.plugin.pathMapper.getEffectiveRealPath(mount);
-		if (effectivePath !== mount.realPath) {
-			// Check whether the effective path came from a device override or the fallback
-			const isFromDeviceOverride = mount.deviceOverrides?.[this.plugin.settings.deviceId] === effectivePath;
-			desc += isFromDeviceOverride
-				? `\n(Path override for this device: ${effectivePath})`
-				: `\n(Using fallback path: ${effectivePath})`;
-		} else if (mount.fallbackRealPath && effectivePath === mount.realPath) {
-			desc += `\n(Fallback configured: ${mount.fallbackRealPath})`;
+		// Explain where the effective path came from. Compare against the
+		// *expanded* primary path: a {{vault}} mount always differs from its raw
+		// realPath after expansion, and that must not be reported as a fallback.
+		const { pathMapper } = this.plugin;
+		const effectivePath = pathMapper.getEffectiveRealPath(mount);
+		const expandedPrimary = pathMapper.expandVaultToken(mount.realPath);
+		const deviceOverride = mount.deviceOverrides?.[this.plugin.settings.deviceId];
+		if (deviceOverride && pathMapper.expandVaultToken(deviceOverride) === effectivePath) {
+			desc += `\n(Path override for this device: ${effectivePath})`;
+		} else if (pathMapper.isUsingFallbackPath(mount.id)) {
+			desc += `\n(Using fallback path: ${effectivePath})`;
+		} else {
+			if (expandedPrimary !== mount.realPath) {
+				desc += `\n(Resolves on this device to: ${expandedPrimary})`;
+			}
+			if (mount.fallbackRealPath) {
+				desc += `\n(Fallback configured: ${mount.fallbackRealPath})`;
+			}
 		}
 
 		const setting = new Setting(containerEl)
